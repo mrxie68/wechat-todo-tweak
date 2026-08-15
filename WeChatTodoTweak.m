@@ -78,6 +78,8 @@
 
 @interface MMNewSessionMgr : NSObject
 - (id)AddOrModifySession:(id)session withNotifyFlag:(BOOL)flag immediateRefresh:(BOOL)refresh;
+- (id)AddOrModifySession:(id)session targetContactUserName:(NSString *)userName
+          withNotifyFlag:(BOOL)flag immediateRefresh:(BOOL)refresh;
 - (void)DeleteSessionOfUser:(NSString *)userName;
 - (id)GetSessionByUserName:(NSString *)userName;
 @end
@@ -230,6 +232,13 @@ static NSString *createTodoSessionOnMain(void) {
             [session setValue:@((unsigned int)now) forKey:@"m_uLastTime"];
         }
         [mgr AddOrModifySession:session withNotifyFlag:YES immediateRefresh:YES];
+        // 变体：带 targetContactUserName 的版本（可能才是正确入口）
+        if ([mgr respondsToSelector:@selector(AddOrModifySession:targetContactUserName:withNotifyFlag:immediateRefresh:)]) {
+            [mgr AddOrModifySession:session
+                 targetContactUserName:kAITodoChatId
+                       withNotifyFlag:YES
+                   immediateRefresh:YES];
+        }
 
         // 回读检查：会话是否真的进了内存
         NSString *inMemory = @"会话未入内存";
@@ -254,6 +263,14 @@ static NSString *createTodoSessionOnMain(void) {
             if ([contactMgr respondsToSelector:@selector(getContactByName:)]) {
                 id known = [contactMgr getContactByName:kAITodoChatId];
                 knownNow = known != nil;
+                if (known) {
+                    NSString *nick = @"";
+                    NSString *remark = @"";
+                    @try { nick = [known valueForKey:@"m_nsNickName"] ?: @""; } @catch (NSException *e) {}
+                    @try { remark = [known valueForKey:@"m_nsRemark"] ?: @""; } @catch (NSException *e) {}
+                    contactNote = [contactNote stringByAppendingFormat:
+                                   @"（回读昵称:%@ 备注:%@）", nick.length ? nick : @"空", remark.length ? remark : @"空"];
+                }
             }
             if (!knownNow) {
                 if ([contactMgr respondsToSelector:@selector(addContact:importInfo:)]) {
