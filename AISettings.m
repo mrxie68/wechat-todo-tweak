@@ -4,6 +4,7 @@
 static NSString * const kAISettingsMemosURLKey = @"WeChatTodoMemosURL";
 static NSString * const kAISettingsMemosTokenKey = @"WeChatTodoMemosToken";
 static NSString * const kAISettingsMemosVisibilityKey = @"WeChatTodoMemosVisibility";
+static NSString * const kAISettingsLastAccountKey = @"WeChatTodoLastAccount";
 
 static NSString *g_currentAccount = nil;
 
@@ -14,12 +15,19 @@ static NSString *g_currentAccount = nil;
         if (usrName.length == 0) return;
         if (![g_currentAccount isEqualToString:usrName]) {
             g_currentAccount = [usrName copy];
+            // 持久化账号：重进微信后账号未刷新时也能读到正确的数据目录
+            [[NSUserDefaults standardUserDefaults] setObject:g_currentAccount
+                                                      forKey:kAISettingsLastAccountKey];
+            [[NSUserDefaults standardUserDefaults] synchronize];
         }
     }
 }
 
 +(NSString *)currentAccount {
     @synchronized (self) {
+        if (g_currentAccount.length == 0) {
+            g_currentAccount = [[NSUserDefaults standardUserDefaults] stringForKey:kAISettingsLastAccountKey];
+        }
         return g_currentAccount;
     }
 }

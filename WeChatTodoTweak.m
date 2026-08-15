@@ -142,6 +142,14 @@ static NSString *wechatSelfUsrName(void) {
     return usrName;
 }
 
+// 供待办页调用：进入页面时立即刷新当前账号（不等消息 hook / 定时器）
+void todoEnsureAccount(void) {
+    @try {
+        NSString *usr = wechatSelfUsrName();
+        if (usr.length > 0) [AISettings setCurrentAccount:usr];
+    } @catch (NSException *e) {}
+}
+
 static NSArray *aiFindDatabaseFiles(void) {
     NSMutableArray *files = [NSMutableArray array];
     NSFileManager *fm = [NSFileManager defaultManager];

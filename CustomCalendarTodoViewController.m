@@ -4,6 +4,8 @@
 #import "AISettings.h"
 #import "AIConfig.h"
 
+extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
+
 #pragma mark - 日历日期 Cell
 
 @interface CalendarDayCell : UICollectionViewCell
@@ -119,6 +121,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    todoEnsureAccount(); // 重进微信后立即拿到当前账号，保证待办目录正确
     // 恢复上次选中的日期，避免退出重进后默认回到“今天”而看不到之前那天的待办
     double saved = [[NSUserDefaults standardUserDefaults] doubleForKey:[self selectedDayKey]];
     self.selectedDay = saved > 0 ? [NSDate dateWithTimeIntervalSince1970:saved] : [NSDate date];
