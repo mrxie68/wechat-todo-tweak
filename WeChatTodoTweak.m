@@ -1255,7 +1255,7 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 
 static void (*orig_AsyncOnAddMsg)(id, SEL, id, CMessageWrap *);
 static void (*orig_MainThreadNotifyToExt)(id, SEL, NSDictionary *);
-static void (*orig_drawingBlockForImage)(id, SEL, id);
+static id (*orig_drawingBlockForImage)(id, SEL, id);
 
 static void swz_AsyncOnAddMsg(id self, SEL _cmd, id arg1, CMessageWrap *wrap) {
     if (orig_AsyncOnAddMsg) orig_AsyncOnAddMsg(self, _cmd, arg1, wrap);
