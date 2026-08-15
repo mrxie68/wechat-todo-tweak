@@ -4,6 +4,8 @@
 #import "TodoPageViewController.h"
 #import "AIConfig.h"
 
+extern NSString *todoGestureDiagnostic(void); // 由 WeChatTodoTweak.m 提供
+
 @interface TodoSettingsViewController () <UITextFieldDelegate>
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIView *contentView;
@@ -20,6 +22,8 @@ static void todoAlert(NSString *msg); // 前向声明
     [super viewDidLoad];
     self.title = @"待办事项设置";
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    // 内容从导航栏下方开始，避免和标题栏重叠
+    self.edgesForExtendedLayout = UIRectEdgeNone;
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -40,7 +44,7 @@ static void todoAlert(NSString *msg); // 前向声明
 
     // 使用说明
     UILabel *intro = [[UILabel alloc] initWithFrame:CGRectMake(x, y, cardW, 60)];
-    intro.text = @"在微信主界面底部向上滑动，即可打开待办页。\n像普通待办 App 一样：添加、勾选、删除、同步。";
+    intro.text = @"主界面底部中间的「⬆ 待办」按钮，或从底部向上滑，即可打开待办页。\n像普通待办 App 一样：添加、勾选、删除、同步。";
     intro.numberOfLines = 0;
     intro.font = [UIFont systemFontOfSize:13];
     intro.textColor = [UIColor secondaryLabelColor];
@@ -52,6 +56,13 @@ static void todoAlert(NSString *msg); // 前向声明
     openBtn.frame = CGRectMake(x, y, cardW, 44);
     [openBtn addTarget:self action:@selector(openTodoTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.contentView addSubview:openBtn];
+    y += 44 + 12;
+
+    // 手势诊断
+    UIButton *diagBtn = [self makeButton:@"🔍 手势诊断（复制到剪贴板）"];
+    diagBtn.frame = CGRectMake(x, y, cardW, 44);
+    [diagBtn addTarget:self action:@selector(gestureDiagTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:diagBtn];
     y += 44 + 12;
 
     // Memos 配置
@@ -140,6 +151,48 @@ static void todoAlert(NSString *msg); // 前向声明
 - (void)openTodoTapped {
     [self.view endEditing:YES];
     [TodoPageViewController presentFrom:self];
+}
+
+// 诊断结果：完整内容复制剪贴板，弹窗只显示摘要；2 分钟后自动清空剪贴板（用完即销毁）
+- (NSString *)consumeDiagnostic:(NSString *)full {
+    [[UIPasteboard generalPasteboard] setString:full];
+    NSString *copied = [full copy];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if ([[[UIPasteboard generalPasteboard] string] isEqualToString:copied]) {
+            [[UIPasteboard generalPasteboard] setString:@""];
+        }
+    });
+    if (full.length > 180) {
+        return [[full substringToIndex:180] stringByAppendingString:
+                @"\n…（完整已复制到剪贴板，2 分钟后自动清除）"];
+    }
+    return full;
+}
+
+- (void)gestureDiagTapped {
+    [self.view endEditing:YES];
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"正在诊断"
+                                                                     message:@"正在读取手势状态…\n\n"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:progress animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        __block NSString *diag = nil;
+        // 诊断会读 UI 层级，必须在主线程执行
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            diag = todoGestureDiagnostic();
+        });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *shortText = [self consumeDiagnostic:diag];
+            [progress dismissViewControllerAnimated:NO completion:^{
+                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"手势诊断"
+                                                                           message:shortText
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:r animated:YES completion:nil];
+            }];
+        });
+    });
 }
 
 - (void)saveTapped {

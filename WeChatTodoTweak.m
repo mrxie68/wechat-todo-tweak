@@ -13,6 +13,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <stdarg.h>
 #import <string.h>
 #import <sqlite3.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -340,16 +341,89 @@ static void runTodoContactCleanupOnce(void) {
 
 #pragma mark - 主界面判断 + 底部上滑呼出待办页
 
-static BOOL isMainFrameVisible(void) {
-    UIViewController *top = tweakTopViewController();
-    if (!top) return NO;
-    NSString *cls = NSStringFromClass([top class]);
-    return [cls rangeOfString:@"NewMainFrame"].location != NSNotFound ||
-           [cls isEqualToString:@"MainFrameViewController"];
+static UIWindow *g_todoWindow = nil;
+static UIButton *g_todoHint = nil;
+static BOOL g_todoPanTriggered = NO;
+static BOOL g_gestureInstalled = NO;
+
+static NSObject *g_diagLock = nil;
+static NSMutableArray *g_diagEvents = nil;
+
+static void diagLog(NSString *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+    @synchronized (g_diagLock) {
+        if (!g_diagEvents) g_diagEvents = [NSMutableArray array];
+        [g_diagEvents addObject:msg];
+        while (g_diagEvents.count > 40) {
+            [g_diagEvents removeObjectAtIndex:0];
+        }
+    }
+    NSLog(kAITodoLogPrefix "%@", msg);
 }
 
-static BOOL g_todoPanTriggered = NO;
-static UILabel *g_todoHint = nil;
+// 窗口视图层级里是否存在微信主界面的底部 tab 栏（类名含 TaskBar/TabBar 且贴近窗口底部）
+static BOOL windowHasBottomBar(UIWindow *window) {
+    if (!window) return NO;
+    NSMutableArray *queue = [NSMutableArray arrayWithObject:window];
+    while (queue.count > 0) {
+        UIView *v = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        NSString *cls = NSStringFromClass([v class]);
+        if ([cls rangeOfString:@"TaskBar"].location != NSNotFound ||
+            [cls rangeOfString:@"TabBar"].location != NSNotFound) {
+            CGRect f = [v convertRect:v.bounds toView:window];
+            if (f.size.height >= 15 && f.size.width > 100 &&
+                f.origin.y + f.size.height >= window.bounds.size.height - 20) {
+                return YES;
+            }
+        }
+        [queue addObjectsFromArray:v.subviews];
+    }
+    return NO;
+}
+
+static BOOL g_cachedMainVisible = NO;
+static NSTimeInterval g_cachedMainTime = 0;
+
+// 当前真正显示在最上层的控制器（走完 presented + 导航栈）
+static UIViewController *visibleViewController(void) {
+    UIViewController *vc = tweakTopViewController();
+    while (vc) {
+        if ([vc isKindOfClass:[UINavigationController class]]) {
+            UIViewController *t = ((UINavigationController *)vc).topViewController;
+            if (t && t != vc) {
+                vc = t;
+                continue;
+            }
+        }
+        break;
+    }
+    return vc;
+}
+
+// 主界面是否可见：只有最上层就是主界面、且底部 tab 栏还在层级里才算。
+// 自己的待办页/设置页、微信弹层、聊天页（tab 栏会被移除）都会自动排除，避免误触。
+static BOOL isMainFrameVisible(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - g_cachedMainTime < 0.3) return g_cachedMainVisible;
+
+    BOOL visible = NO;
+    UIViewController *top = visibleViewController();
+    if (top) {
+        NSString *topCls = NSStringFromClass([top class]);
+        if ([topCls rangeOfString:@"NewMainFrame"].location != NSNotFound ||
+            [topCls rangeOfString:@"MainFrame"].location != NSNotFound) {
+            UIWindow *window = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
+            visible = windowHasBottomBar(window);
+        }
+    }
+    g_cachedMainTime = now;
+    g_cachedMainVisible = visible;
+    return visible;
+}
 
 @interface TodoGestureTarget : NSObject <UIGestureRecognizerDelegate>
 @end
@@ -360,27 +434,33 @@ static TodoGestureTarget *g_todoGestureTarget = nil;
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
        shouldReceiveTouch:(UITouch *)touch {
-    // 只在主界面（聊天列表 + 底部菜单）且触摸点在底部区域时参与识别
-    if (!isMainFrameVisible()) return NO;
+    // 只在主界面且触摸点在底部区域时参与识别
+    BOOL mainVisible = isMainFrameVisible();
     CGPoint p = [touch locationInView:gestureRecognizer.view];
     CGRect b = gestureRecognizer.view.bounds;
-    return p.y >= b.size.height - 88.0;
+    BOOL inZone = p.y >= b.size.height - 88.0;
+    if (inZone) {
+        diagLog(@"底部触摸 y=%.0f main=%d → %@", p.y, mainVisible,
+                mainVisible ? @"参与识别" : @"跳过");
+    }
+    return mainVisible && inZone;
 }
 
 - (void)todoPan:(UIPanGestureRecognizer *)pan {
     if (pan.state == UIGestureRecognizerStateChanged) {
         CGPoint t = [pan translationInView:pan.view];
-        // 上滑超过 70pt 且纵向为主，才算有效手势
-        if (t.y < -70 && fabs(t.y) > fabs(t.x) * 1.2) {
+        // 上滑超过 50pt 且纵向为主，才算有效手势
+        if (t.y < -50 && fabs(t.y) > fabs(t.x)) {
             g_todoPanTriggered = YES;
         }
     } else if (pan.state == UIGestureRecognizerStateEnded) {
         CGPoint t = [pan translationInView:pan.view];
+        diagLog(@"pan 结束 t=(%.0f,%.0f) trigger=%d", t.x, t.y, g_todoPanTriggered);
         if (g_todoPanTriggered && t.y < -40) {
             [TodoPageViewController presentFrom:tweakTopViewController()];
         }
         g_todoPanTriggered = NO;
-    } else {
+    } else if (pan.state != UIGestureRecognizerStatePossible) {
         g_todoPanTriggered = NO;
     }
     if (g_todoHint) {
@@ -388,16 +468,24 @@ static TodoGestureTarget *g_todoGestureTarget = nil;
     }
 }
 
+- (void)todoHintTapped {
+    diagLog(@"提示条点击，打开待办页");
+    [TodoPageViewController presentFrom:tweakTopViewController()];
+}
+
 @end
 
 static void installTodoGestureAndHint(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_gestureInstalled) return;
         UIWindow *window = [UIApplication sharedApplication].keyWindow;
         if (!window) window = [UIApplication sharedApplication].windows.firstObject;
         if (!window) return;
-        static BOOL installed = NO;
-        if (installed) return;
-        installed = YES;
+        // 多窗口时优先选包含底部 tab 栏的主窗口
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (windowHasBottomBar(w)) { window = w; break; }
+        }
+        g_todoWindow = window;
 
         if (!g_todoGestureTarget) {
             g_todoGestureTarget = [[TodoGestureTarget alloc] init];
@@ -408,23 +496,25 @@ static void installTodoGestureAndHint(void) {
         pan.delegate = g_todoGestureTarget;
         [window addGestureRecognizer:pan];
 
-        // 底部小提示（不拦截触摸，纯展示）
-        g_todoHint = [[UILabel alloc] initWithFrame:CGRectZero];
-        g_todoHint.text = @"⬆ 待办";
-        g_todoHint.font = [UIFont systemFontOfSize:11];
-        g_todoHint.textColor = [UIColor systemGrayColor];
+        // 底部小按钮：点击也能打开待办页，同时作为上滑入口提示（不遮挡 tab 按钮）
+        g_todoHint = [UIButton buttonWithType:UIButtonTypeSystem];
+        [g_todoHint setTitle:@"⬆ 待办" forState:UIControlStateNormal];
+        g_todoHint.titleLabel.font = [UIFont systemFontOfSize:11];
+        g_todoHint.tintColor = [UIColor systemGrayColor];
         g_todoHint.backgroundColor = [UIColor systemGray6Color];
         g_todoHint.layer.cornerRadius = 11;
-        g_todoHint.clipsToBounds = YES;
-        g_todoHint.textAlignment = NSTextAlignmentCenter;
-        g_todoHint.userInteractionEnabled = NO;
+        g_todoHint.layer.borderColor = [UIColor systemGray4Color].CGColor;
+        g_todoHint.layer.borderWidth = 0.5;
+        [g_todoHint addTarget:g_todoGestureTarget
+                       action:@selector(todoHintTapped)
+             forControlEvents:UIControlEventTouchUpInside];
         [window addSubview:g_todoHint];
         [window bringSubviewToFront:g_todoHint];
 
         CGRect b = window.bounds;
         CGFloat bottomInset = 0;
         if (@available(iOS 11.0, *)) bottomInset = window.safeAreaInsets.bottom;
-        CGFloat hintW = 66, hintH = 24;
+        CGFloat hintW = 66, hintH = 26;
         g_todoHint.frame = CGRectMake((b.size.width - hintW) / 2.0,
                                       b.size.height - bottomInset - 49.0 - hintH - 12.0,
                                       hintW, hintH);
@@ -433,6 +523,7 @@ static void installTodoGestureAndHint(void) {
             UIViewAutoresizingFlexibleRightMargin |
             UIViewAutoresizingFlexibleTopMargin;
         g_todoHint.hidden = !isMainFrameVisible();
+        g_gestureInstalled = YES;
 
         // 每秒刷新提示可见性（主界面显示时出现，进聊天/设置后隐藏）
         NSTimer *hintTimer = [NSTimer timerWithTimeInterval:1.0
@@ -442,8 +533,49 @@ static void installTodoGestureAndHint(void) {
         }];
         [[NSRunLoop mainRunLoop] addTimer:hintTimer forMode:NSRunLoopCommonModes];
 
-        NSLog(kAITodoLogPrefix "底部上滑手势 + 提示已安装");
+        diagLog(@"手势+提示条已安装 window=%@", NSStringFromClass([window class]));
     });
+}
+
+// 手势诊断（设置页按钮调用，结果复制到剪贴板）
+NSString *todoGestureDiagnostic(void) {
+    NSMutableString *s = [NSMutableString string];
+    [s appendFormat:@"待办插件 v%@ 手势诊断\n", kAITodoVersion];
+    UIWindow *key = [UIApplication sharedApplication].keyWindow;
+    [s appendFormat:@"keyWindow: %@\n", key ? NSStringFromClass([key class]) : @"无"];
+    UIViewController *root = key ? key.rootViewController : nil;
+    [s appendFormat:@"rootVC: %@\n", root ? NSStringFromClass([root class]) : @"无"];
+    UIViewController *top = tweakTopViewController();
+    [s appendFormat:@"topVC: %@\n", top ? NSStringFromClass([top class]) : @"无"];
+    UIWindow *win = g_todoWindow ?: key;
+    [s appendFormat:@"手势窗口: %@\n", win ? NSStringFromClass([win class]) : @"无"];
+    [s appendFormat:@"底部栏可见: %@\n", windowHasBottomBar(win) ? @"是" : @"否"];
+    [s appendFormat:@"主界面判定: %@\n", isMainFrameVisible() ? @"是" : @"否"];
+    [s appendFormat:@"手势已安装: %@\n", g_gestureInstalled ? @"是" : @"否"];
+    if (win) {
+        NSMutableArray *queue = [NSMutableArray arrayWithObject:win];
+        BOOL found = NO;
+        while (queue.count > 0 && !found) {
+            UIView *v = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            NSString *cls = NSStringFromClass([v class]);
+            if ([cls rangeOfString:@"TaskBar"].location != NSNotFound ||
+                [cls rangeOfString:@"TabBar"].location != NSNotFound) {
+                [s appendFormat:@"底部栏类: %@\n", cls];
+                found = YES;
+                break;
+            }
+            [queue addObjectsFromArray:v.subviews];
+        }
+        if (!found) [s appendString:@"底部栏类: 未找到\n"];
+    }
+    @synchronized (g_diagLock) {
+        [s appendString:@"\n事件日志（最近40条）:\n"];
+        for (NSString *e in g_diagEvents) {
+            [s appendFormat:@"%@\n", e];
+        }
+    }
+    return s.length ? s : @"无数据";
 }
 
 // 定时刷新当前账号（多账号隔离），同时兜底触发旧联系人清理
@@ -515,6 +647,7 @@ static void registerWithWCPlugins(int remaining) {
 __attribute__((constructor))
 static void WeChatTodoInit(void) {
     NSLog(kAITodoLogPrefix "待办事项插件已加载（v%@）…", kAITodoVersion);
+    g_diagLock = [[NSObject alloc] init];
 
     [[NSNotificationCenter defaultCenter] addObserverForName:@"UIApplicationDidFinishLaunchingNotification"
                                                       object:nil

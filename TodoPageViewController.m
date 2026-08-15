@@ -13,7 +13,7 @@ static NSString *todoDateString(double ts) {
     return [fmt stringFromDate:date];
 }
 
-@interface TodoPageViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>
+@interface TodoPageViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UISegmentedControl *segmentControl;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIView *inputBar;
@@ -45,6 +45,15 @@ static NSString *todoDateString(double ts) {
     [super viewDidLoad];
     self.title = @"待办事项";
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    // 内容从导航栏下方开始，避免和标题栏重叠（参考 AI 插件设置页的布局方式）
+    self.edgesForExtendedLayout = UIRectEdgeNone;
+
+    // 点击空白处收起键盘
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                         action:@selector(dismissKeyboard)];
+    tap.cancelsTouchesInView = NO;
+    tap.delegate = self;
+    [self.view addGestureRecognizer:tap];
 
     // 关闭
     UIImage *down = [UIImage systemImageNamed:@"chevron.down"];
@@ -132,25 +141,27 @@ static NSString *todoDateString(double ts) {
     [self reloadItems];
 }
 
-- (void)viewWillLayoutSubviews {
-    [super viewWillLayoutSubviews];
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
     CGRect b = self.view.bounds;
     UIEdgeInsets sa = self.view.safeAreaInsets;
 
-    CGFloat segY = 10.0;
+    CGFloat segY = sa.top + 10.0;
     CGFloat segH = 32.0;
     self.segmentControl.frame = CGRectMake(16, segY, b.size.width - 32, segH);
 
-    CGFloat barH = 50.0 + (self.keyboardInset > 0 ? 0 : sa.bottom);
+    CGFloat barContentH = 50.0;
+    CGFloat barH = barContentH + (self.keyboardInset > 0 ? 0 : sa.bottom);
     CGFloat barBottom = b.size.height - self.keyboardInset;
     self.inputBar.frame = CGRectMake(0, barBottom - barH, b.size.width, barH);
 
     CGFloat fieldH = 34.0;
     CGFloat btnW = 60.0;
     CGFloat btnGap = 8.0;
-    self.inputField.frame = CGRectMake(16, (barH - fieldH) / 2.0,
+    CGFloat fieldY = (barContentH - fieldH) / 2.0;
+    self.inputField.frame = CGRectMake(16, fieldY,
                                        b.size.width - 32 - btnW - btnGap, fieldH);
-    self.addButton.frame = CGRectMake(b.size.width - 16 - btnW, (barH - fieldH) / 2.0,
+    self.addButton.frame = CGRectMake(b.size.width - 16 - btnW, fieldY,
                                       btnW, fieldH);
 
     CGFloat tableTop = segY + segH + 8;
@@ -328,6 +339,21 @@ static NSString *todoDateString(double ts) {
     [UIView animateWithDuration:0.25 animations:^{
         [self.view layoutIfNeeded];
     }];
+}
+
+- (void)dismissKeyboard {
+    [self.view endEditing:YES];
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+       shouldReceiveTouch:(UITouch *)touch {
+    // 输入框/按钮上的点击不拦截，其余空白处点击收起键盘
+    if ([touch.view isKindOfClass:[UIControl class]] ||
+        [touch.view isKindOfClass:[UITextField class]] ||
+        [touch.view isKindOfClass:[UITextView class]]) {
+        return NO;
+    }
+    return YES;
 }
 
 #pragma mark - 工具
