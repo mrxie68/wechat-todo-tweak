@@ -17,6 +17,7 @@ clang \
   -framework Foundation \
   -framework UIKit \
   -framework CoreGraphics \
+  -framework QuartzCore \
   -lsqlite3 \
   -o wechat-todo.dylib \
   AISettings.m AITodoManager.m TodoSettingsViewController.m TodoPageViewController.m \
