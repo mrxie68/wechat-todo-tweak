@@ -13,7 +13,14 @@ static UIColor *cardUnselectedColor(void) {
 }
 
 static UIColor *cardSelectedColor(void) {
-    return [UIColor colorWithRed:0.68 green:0.53 blue:0.40 alpha:1.0]; // 棕色
+    if (@available(iOS 13.0, *)) {
+        return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+            return trait.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? [UIColor systemGray5Color]
+                : [UIColor colorWithRed:0.85 green:0.78 blue:0.95 alpha:1.0]; // 稍深浅紫
+        }];
+    }
+    return [UIColor colorWithRed:0.85 green:0.78 blue:0.95 alpha:1.0];
 }
 
 @interface CustomTodoTableViewCell () <UIGestureRecognizerDelegate>
@@ -96,10 +103,10 @@ static UIColor *cardSelectedColor(void) {
 
     // 图标
     _iconBg.backgroundColor = todo.isSelected
-        ? [UIColor colorWithRed:0.92 green:0.85 blue:0.72 alpha:1.0]
+        ? [UIColor colorWithRed:0.78 green:0.68 blue:0.94 alpha:1.0]
         : [UIColor colorWithRed:0.84 green:0.77 blue:0.95 alpha:1.0];
     _iconView.tintColor = todo.isSelected
-        ? [UIColor whiteColor]
+        ? [UIColor colorWithRed:0.42 green:0.30 blue:0.72 alpha:1.0]
         : [UIColor colorWithRed:0.45 green:0.34 blue:0.72 alpha:1.0];
 
     // 标题
@@ -113,7 +120,7 @@ static UIColor *cardSelectedColor(void) {
     } else {
         _titleLabel.attributedText = nil;
         _titleLabel.text = todo.title;
-        _titleLabel.textColor = todo.isSelected ? [UIColor whiteColor] : [UIColor labelColor];
+        _titleLabel.textColor = [UIColor labelColor];
     }
 
     // 书签
@@ -125,7 +132,7 @@ static UIColor *cardSelectedColor(void) {
     // 加号
     UIImage *plus = [UIImage systemImageNamed:@"plus.circle.fill"];
     [_plusButton setImage:plus forState:UIControlStateNormal];
-    _plusButton.tintColor = todo.isSelected ? [UIColor whiteColor] : [UIColor secondaryLabelColor];
+    _plusButton.tintColor = [UIColor secondaryLabelColor];
 
     // 子任务行
     for (UIView *v in _subRows) [v removeFromSuperview];
@@ -227,8 +234,7 @@ static UIColor *cardSelectedColor(void) {
             UIImage *img = [UIImage systemImageNamed:sub.isCompleted ? @"checkmark.circle.fill" : @"circle"];
             img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
             [check setImage:img forState:UIControlStateNormal];
-            check.tintColor = sub.isCompleted ? kAITodoAccentColor
-                                              : (_todo.isSelected ? [UIColor whiteColor] : [UIColor systemGray3Color]);
+            check.tintColor = sub.isCompleted ? kAITodoAccentColor : [UIColor systemGray3Color];
             if (sub.isCompleted) {
                 label.attributedText =
                     [[NSAttributedString alloc] initWithString:sub.title ?: @""
@@ -239,7 +245,7 @@ static UIColor *cardSelectedColor(void) {
             } else {
                 label.attributedText = nil;
                 label.text = sub.title;
-                label.textColor = _todo.isSelected ? [UIColor whiteColor] : [UIColor labelColor];
+                label.textColor = [UIColor labelColor];
             }
         }
         y += 34;

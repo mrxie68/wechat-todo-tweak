@@ -57,25 +57,20 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
         self.backgroundColor = kAITodoAccentColor;
         _weekLabel.textColor = [UIColor systemBackgroundColor];
         _dayLabel.textColor = [UIColor systemBackgroundColor];
-        _dotView.backgroundColor = [UIColor systemBackgroundColor];
+        _dotView.hidden = YES; // 选中日不显示圆点，避免出现小白圈
     } else {
         self.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
         _weekLabel.textColor = [UIColor secondaryLabelColor];
         _dayLabel.textColor = isToday ? kAITodoAccentColor : [UIColor labelColor];
-        _dotView.backgroundColor = kAITodoAccentColor;
-    }
-    // 圆点规则：今天=橙色；其它天有待办=淡绿；选中态圆点反白
-    if (selected) {
-        _dotView.backgroundColor = [UIColor systemBackgroundColor];
-        _dotView.hidden = NO;
-    } else if (isToday) {
-        _dotView.backgroundColor = kAITodoAccentColor;
-        _dotView.hidden = NO;
-    } else if (hasTodos) {
-        _dotView.backgroundColor = [UIColor colorWithRed:0.45 green:0.82 blue:0.55 alpha:1.0];
-        _dotView.hidden = NO;
-    } else {
-        _dotView.hidden = YES;
+        if (isToday) {
+            _dotView.backgroundColor = kAITodoAccentColor;
+            _dotView.hidden = NO;
+        } else if (hasTodos) {
+            _dotView.backgroundColor = [UIColor colorWithRed:0.45 green:0.82 blue:0.55 alpha:1.0];
+            _dotView.hidden = NO;
+        } else {
+            _dotView.hidden = YES;
+        }
     }
 }
 
