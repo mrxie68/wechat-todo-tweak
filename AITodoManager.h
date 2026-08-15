@@ -9,6 +9,8 @@
 + (NSString *)markTodo:(NSInteger)todoId done:(BOOL)done;
 + (NSString *)deleteTodo:(NSInteger)todoId;
 + (NSString *)clearDone;                      // 清空所有已完成，返回提示文本
++ (BOOL)updateTodo:(NSInteger)todoId content:(NSString *)content note:(NSString *)note
+                due:(double)due important:(BOOL)important; // 更新内容/备注/截止/重要
 + (NSString *)syncToMemosNow;                  // 同步，返回结果文本
 
 @end

@@ -102,6 +102,30 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
         : @"没有已完成的记录可清空。";
 }
 
++ (BOOL)updateTodo:(NSInteger)todoId content:(NSString *)content note:(NSString *)note
+                due:(double)due important:(BOOL)important {
+    NSMutableArray *list = [self loadTodos];
+    for (NSDictionary *t in list) {
+        if ([t[@"id"] integerValue] == todoId) {
+            NSMutableDictionary *m = [t mutableCopy];
+            NSString *trimmed = [content stringByTrimmingCharactersInSet:
+                                 [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (trimmed.length > 0) m[@"content"] = trimmed;
+            NSString *trimmedNote = [note stringByTrimmingCharactersInSet:
+                                     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (trimmedNote.length > 0) m[@"note"] = trimmedNote;
+            else [m removeObjectForKey:@"note"];
+            if (due > 0) m[@"due"] = @(due);
+            else [m removeObjectForKey:@"due"];
+            m[@"important"] = @(important);
+            [list replaceObjectAtIndex:[list indexOfObject:t] withObject:m];
+            [self saveTodos:list];
+            return YES;
+        }
+    }
+    return NO;
+}
+
 // ===== Memos 同步（尽力而为：失败不影响本地） =====
 
 + (NSString *)memosBaseURL {

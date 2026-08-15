@@ -2,6 +2,8 @@
 #import "AITodoManager.h"
 #import "AISettings.h"
 #import "TodoSettingsViewController.h"
+#import "TodoDetailViewController.h"
+#import "TodoTableViewCell.h"
 #import "AIConfig.h"
 
 // 时间戳转可读时间
@@ -280,11 +282,29 @@ static NSString *todoDateString(double ts) {
         if (seg == 1 && !done) continue;
         [filtered addObject:t];
     }
-    // 未完成在前，同状态按编号倒序
+    // 未完成在前；未完成里：重要优先 → 截止近的在前（无截止最后）→ 编号倒序；已完成按完成时间倒序
     [filtered sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         BOOL da = [a[@"done"] boolValue];
         BOOL db = [b[@"done"] boolValue];
         if (da != db) return da ? NSOrderedDescending : NSOrderedAscending;
+        if (!da) {
+            BOOL ia = [a[@"important"] boolValue];
+            BOOL ib = [b[@"important"] boolValue];
+            if (ia != ib) return ia ? NSOrderedAscending : NSOrderedDescending;
+            double dueA = [a[@"due"] doubleValue];
+            double dueB = [b[@"due"] doubleValue];
+            if (dueA > 0 && dueB > 0) {
+                if (dueA != dueB) return dueA < dueB ? NSOrderedAscending : NSOrderedDescending;
+            } else if (dueA > 0) {
+                return NSOrderedAscending;
+            } else if (dueB > 0) {
+                return NSOrderedDescending;
+            }
+            return [b[@"id"] compare:a[@"id"]];
+        }
+        double daA = [a[@"doneAt"] doubleValue];
+        double daB = [b[@"doneAt"] doubleValue];
+        if (daA != daB) return daA > daB ? NSOrderedAscending : NSOrderedDescending;
         return [b[@"id"] compare:a[@"id"]];
     }];
     self.filteredTodos = filtered;
@@ -351,66 +371,80 @@ static NSString *todoDateString(double ts) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TodoCell"];
+    TodoTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TodoCell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                      reuseIdentifier:@"TodoCell"];
+        cell = [[TodoTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                        reuseIdentifier:@"TodoCell"];
     }
-    cell.backgroundColor = [UIColor whiteColor];
     NSDictionary *t = self.filteredTodos[indexPath.row];
     BOOL done = [t[@"done"] boolValue];
     NSString *content = t[@"content"] ?: @"";
 
-    if (done) {
-        cell.textLabel.attributedText =
-            [[NSAttributedString alloc] initWithString:content
-                                            attributes:@{NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)}];
-        cell.textLabel.textColor = [UIColor secondaryLabelColor];
+    NSMutableString *meta = [NSMutableString string];
+    if ([t[@"important"] boolValue]) [meta appendString:@"⭐ "];
+    double due = [t[@"due"] doubleValue];
+    BOOL overdue = NO;
+    if (due > 0) {
+        overdue = !done && due < [[NSDate date] timeIntervalSince1970];
+        [meta appendFormat:@"⏰ %@", todoDateString(due)];
+        if (overdue) [meta appendString:@"（已逾期）"];
+    } else if (done) {
+        double doneAt = [t[@"doneAt"] doubleValue];
+        if (doneAt > 0) [meta appendFormat:@"✅ 完成于 %@", todoDateString(doneAt)];
     } else {
-        cell.textLabel.attributedText = nil;
-        cell.textLabel.text = content;
-        cell.textLabel.textColor = [UIColor labelColor];
+        [meta appendFormat:@"创建于 %@", todoDateString([t[@"created"] doubleValue])];
     }
-
-    double created = [t[@"created"] doubleValue];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"#%@ · %@",
-                                 t[@"id"], todoDateString(created)];
-    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-
-    UIImage *img = [UIImage systemImageNamed:done ? @"checkmark.circle.fill" : @"circle"];
-    if (!img) {
-        img = [self textImage:done ? @"☑" : @"☐"];
-    } else {
-        img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    }
-    cell.imageView.image = img;
-    cell.imageView.tintColor = done ? [UIColor systemGreenColor] : [UIColor systemGray3Color];
+    [cell setDone:done important:[t[@"important"] boolValue] overdue:overdue
+           content:content meta:meta];
+    NSInteger todoId = [t[@"id"] integerValue];
+    cell.onToggle = ^{
+        [AITodoManager markTodo:todoId done:!done];
+        [self reloadItems];
+    };
     return cell;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *t = self.filteredTodos[indexPath.row];
+    NSString *content = t[@"content"] ?: @"";
+    CGFloat cw = tableView.bounds.size.width - 56 - 14;
+    NSInteger lines = MAX(1, (NSInteger)ceil(content.length / (cw / 17.0)));
+    if (lines > 2) lines = 2;
+    return MAX(64, 18 + lines * 22 + 24);
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *t = self.filteredTodos[indexPath.row];
-    [AITodoManager markTodo:[t[@"id"] integerValue] done:![t[@"done"] boolValue]];
-    [self reloadItems];
+    TodoDetailViewController *vc = [[TodoDetailViewController alloc] initWithTodo:t];
+    [self.navigationController pushViewController:vc animated:YES];
 }
 
-- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-    return YES;
-}
-
-- (NSString *)tableView:(UITableView *)tableView
-    titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath {
-    return @"删除";
-}
-
-- (void)tableView:(UITableView *)tableView
-    commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
-     forRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (editingStyle != UITableViewCellEditingStyleDelete) return;
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
+    trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     NSDictionary *t = self.filteredTodos[indexPath.row];
-    [AITodoManager deleteTodo:[t[@"id"] integerValue]];
-    [self reloadItems];
+    NSInteger todoId = [t[@"id"] integerValue];
+    BOOL done = [t[@"done"] boolValue];
+
+    UIContextualAction *toggleAction = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleNormal
+                            title:done ? @"取消完成" : @"完成"
+                          handler:^(UIContextualAction *action, UIView *sourceView, void (^completion)(BOOL)) {
+        [AITodoManager markTodo:todoId done:!done];
+        [self reloadItems];
+        completion(YES);
+    }];
+    toggleAction.backgroundColor = [UIColor systemGreenColor];
+
+    UIContextualAction *deleteAction = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleDestructive
+                            title:@"删除"
+                          handler:^(UIContextualAction *action, UIView *sourceView, void (^completion)(BOOL)) {
+        [AITodoManager deleteTodo:todoId];
+        [self reloadItems];
+        completion(YES);
+    }];
+    return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction, toggleAction]];
 }
 
 #pragma mark - 操作
@@ -537,17 +571,6 @@ static NSString *todoDateString(double ts) {
         return NO;
     }
     return YES;
-}
-
-#pragma mark - 工具
-
-- (UIImage *)textImage:(NSString *)text {
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(24, 24), NO, 0);
-    [text drawInRect:CGRectMake(0, 3, 24, 20)
-      withAttributes:@{NSFontAttributeName: [UIFont systemFontOfSize:16]}];
-    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return img;
 }
 
 @end

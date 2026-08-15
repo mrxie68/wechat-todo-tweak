@@ -19,7 +19,8 @@ clang \
   -framework CoreGraphics \
   -lsqlite3 \
   -o wechat-todo.dylib \
-  AISettings.m AITodoManager.m TodoSettingsViewController.m TodoPageViewController.m WeChatTodoTweak.m
+  AISettings.m AITodoManager.m TodoSettingsViewController.m TodoPageViewController.m \
+  TodoDetailViewController.m TodoTableViewCell.m WeChatTodoTweak.m
 
 codesign -f -s - wechat-todo.dylib || true
 
