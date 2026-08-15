@@ -2,7 +2,7 @@
 #define AIConfig_h
 
 // 待办事项插件版本（设置页底部显示）
-#define kAITodoVersion @"0.3.33"
+#define kAITodoVersion @"0.3.34"
 
 // 旧版假联系人 ID（v0.2.0 已弃用，仅用于启动时一次性清理残留）
 #define kAITodoChatId @"todo@local"

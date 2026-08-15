@@ -349,6 +349,16 @@ static void runTodoContactCleanupOnce(void) {
 
 #pragma mark - 底部菜单加“待办”tab
 
+// 崩溃自恢复：启动时标记，若 45 秒内没有清除（说明可能崩了），下次跳过 tab 注入
+static BOOL todoTabCrashGuard(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if ([d boolForKey:@"WeChatTodoTabSuspectedCrash"]) {
+        diagLog(@"检测到上次疑似崩溃，本次跳过 tab 注入");
+        return NO;
+    }
+    return YES;
+}
+
 static UIWindow *g_todoWindow = nil;
 static UIView *g_todoTabContainer = nil;
 static UIView *g_todoTabItemView = nil;
@@ -666,21 +676,24 @@ static void installTabSwitchHook(void) {
     if (!cls) return;
     static BOOL hooked = NO;
     if (hooked) return;
-
-    Method m1 = class_getInstanceMethod(cls, @selector(setSelectedIndex:));
-    if (m1) {
-        orig_setSelectedIndex = (void *)method_getImplementation(m1);
-        method_setImplementation(m1, (IMP)swz_setSelectedIndex);
-    }
-    Method m2 = class_getInstanceMethod(cls, @selector(setSelectedViewController:));
-    if (m2) {
-        orig_setSelectedViewController = (void *)method_getImplementation(m2);
-        method_setImplementation(m2, (IMP)swz_setSelectedViewController);
-    }
-    Method m3 = class_getInstanceMethod(cls, @selector(tabBar:didSelectItem:));
-    if (m3) {
-        orig_tabBarDidSelect = (void *)method_getImplementation(m3);
-        method_setImplementation(m3, (IMP)swz_tabBarDidSelect);
+    @try {
+        Method m1 = class_getInstanceMethod(cls, @selector(setSelectedIndex:));
+        if (m1) {
+            orig_setSelectedIndex = (void *)method_getImplementation(m1);
+            method_setImplementation(m1, (IMP)swz_setSelectedIndex);
+        }
+        Method m2 = class_getInstanceMethod(cls, @selector(setSelectedViewController:));
+        if (m2) {
+            orig_setSelectedViewController = (void *)method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)swz_setSelectedViewController);
+        }
+        Method m3 = class_getInstanceMethod(cls, @selector(tabBar:didSelectItem:));
+        if (m3) {
+            orig_tabBarDidSelect = (void *)method_getImplementation(m3);
+            method_setImplementation(m3, (IMP)swz_tabBarDidSelect);
+        }
+    } @catch (NSException *e) {
+        NSLog(kAITodoLogPrefix "tab 切换 hook 安装异常: %@", e);
     }
     hooked = YES;
     NSLog(kAITodoLogPrefix "tab 切换 hook 已安装");
@@ -725,68 +738,73 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
 // 结构匹配才加：容器 + tab 项存在，否则静默跳过（诊断里能看到原因）
 static void installTodoTabItem(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_todoTabItemView) return;
-        UIWindow *window = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
-        if (!window) return;
-        UIView *container = findBottomTabContainer(window);
-        if (!container) return;
-        g_todoWindow = window;
+        if (!todoTabCrashGuard()) return;
+        @try {
+            if (g_todoTabItemView) return;
+            UIWindow *window = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
+            if (!window) return;
+            UIView *container = findBottomTabContainer(window);
+            if (!container) return;
+            g_todoWindow = window;
 
-        // 先确认 tab 数量（3 或 4 个，防止误判其它视图）
-        NSUInteger tabCount = detectTabCount(container);
-        if (tabCount < 3) return;
+            // 先确认 tab 数量（3 或 4 个，防止误判其它视图）
+            NSUInteger tabCount = detectTabCount(container);
+            if (tabCount < 3) return;
 
-        if (!g_todoTabTarget) {
-            g_todoTabTarget = [[TodoTabTarget alloc] init];
-        }
-
-        CGFloat newW = container.bounds.size.width / (tabCount + 1.0);
-        CGFloat itemY = 0, itemH = 55.0;
-        for (UIView *s in container.subviews) {
-            NSString *cls = NSStringFromClass([s class]);
-            if ([cls rangeOfString:@"TabBarItem"].location != NSNotFound ||
-                [cls rangeOfString:@"TabBarButton"].location != NSNotFound) {
-                itemY = s.frame.origin.y;
-                itemH = s.frame.size.height;
-                break;
+            if (!g_todoTabTarget) {
+                g_todoTabTarget = [[TodoTabTarget alloc] init];
             }
-        }
-        g_todoTabItemView = makeTodoTabItemView(newW, itemH);
-        g_todoTabItemView.frame = CGRectMake(tabCount * newW, itemY, newW, itemH);
-        [container addSubview:g_todoTabItemView];
-        g_todoTabContainer = container;
-        relayoutTodoTabItems();
 
-        // 微信自己重排后自动恢复我们的布局（只 swizzle 一次）
-        Class cls = [container class];
-        if (!g_tabSwizzled) {
-            Method m = class_getInstanceMethod(cls, @selector(layoutSubviews));
-            if (m) {
-                orig_tabLayoutSubviews = (void *)method_getImplementation(m);
-                method_setImplementation(m, (IMP)swz_tabLayoutSubviews);
-                g_tabSwizzled = YES;
+            CGFloat newW = container.bounds.size.width / (tabCount + 1.0);
+            CGFloat itemY = 0, itemH = 55.0;
+            for (UIView *s in container.subviews) {
+                NSString *cls = NSStringFromClass([s class]);
+                if ([cls rangeOfString:@"TabBarItem"].location != NSNotFound ||
+                    [cls rangeOfString:@"TabBarButton"].location != NSNotFound) {
+                    itemY = s.frame.origin.y;
+                    itemH = s.frame.size.height;
+                    break;
+                }
             }
+            g_todoTabItemView = makeTodoTabItemView(newW, itemH);
+            g_todoTabItemView.frame = CGRectMake(tabCount * newW, itemY, newW, itemH);
+            [container addSubview:g_todoTabItemView];
+            g_todoTabContainer = container;
+            relayoutTodoTabItems();
+
+            // 微信自己重排后自动恢复我们的布局（只 swizzle 一次）
+            Class cls = [container class];
+            if (!g_tabSwizzled) {
+                Method m = class_getInstanceMethod(cls, @selector(layoutSubviews));
+                if (m) {
+                    orig_tabLayoutSubviews = (void *)method_getImplementation(m);
+                    method_setImplementation(m, (IMP)swz_tabLayoutSubviews);
+                    g_tabSwizzled = YES;
+                }
+            }
+            // 其它 4 个 tab 点击时关闭待办页（按钮和 item 都挂，确保生效）
+            NSArray *otherButtons = viewsWithName(container, @"TabBarButton");
+            for (UIView *iv in otherButtons) {
+                UITapGestureRecognizer *t =
+                    [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
+                                                            action:@selector(otherTabTapped)];
+                t.cancelsTouchesInView = NO;
+                [iv addGestureRecognizer:t];
+            }
+            NSArray *otherItems = viewsWithName(container, @"TabBarItem");
+            for (UIView *iv in otherItems) {
+                UITapGestureRecognizer *t =
+                    [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
+                                                            action:@selector(otherTabTapped)];
+                t.cancelsTouchesInView = NO;
+                [iv addGestureRecognizer:t];
+            }
+            diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
+                    NSStringFromClass(cls), (unsigned long)tabCount);
+            installTabSwitchHook();
+        } @catch (NSException *e) {
+            NSLog(kAITodoLogPrefix "tab 注入异常（已跳过）: %@", e);
         }
-        // 其它 4 个 tab 点击时关闭待办页（按钮和 item 都挂，确保生效）
-        NSArray *otherButtons = viewsWithName(container, @"TabBarButton");
-        for (UIView *iv in otherButtons) {
-            UITapGestureRecognizer *t =
-                [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
-                                                        action:@selector(otherTabTapped)];
-            t.cancelsTouchesInView = NO;
-            [iv addGestureRecognizer:t];
-        }
-        NSArray *otherItems = viewsWithName(container, @"TabBarItem");
-        for (UIView *iv in otherItems) {
-            UITapGestureRecognizer *t =
-                [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
-                                                        action:@selector(otherTabTapped)];
-            t.cancelsTouchesInView = NO;
-            [iv addGestureRecognizer:t];
-        }
-        diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
-                NSStringFromClass(cls), (unsigned long)tabCount);
-        installTabSwitchHook();
     });
 }
 
@@ -961,6 +979,16 @@ __attribute__((constructor))
 static void WeChatTodoInit(void) {
     NSLog(kAITodoLogPrefix "待办事项插件已加载（v%@）…", kAITodoVersion);
     g_diagLock = [[NSObject alloc] init];
+
+    // 崩溃自恢复：启动即标记；若微信正常跑到 45 秒则清除（说明没崩）
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:YES forKey:@"WeChatTodoTabSuspectedCrash"];
+    [defaults synchronize];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [defaults setBool:NO forKey:@"WeChatTodoTabSuspectedCrash"];
+        [defaults synchronize];
+    });
 
     [[NSNotificationCenter defaultCenter] addObserverForName:@"UIApplicationDidFinishLaunchingNotification"
                                                       object:nil
