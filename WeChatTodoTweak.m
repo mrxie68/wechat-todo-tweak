@@ -542,7 +542,34 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         free(methods);
     }
 
-    // 3. 主界面类（只报关键候选，过滤 WA/NSKVONotifying/View 噪音）
+    // 2.5 会话对象类探测（构造 AddOrModifySession 需要）
+    for (NSString *cn in @[@"WCContactSession", @"MMSession", @"WCSession", @"MMNewSession"]) {
+        Class cls = NSClassFromString(cn);
+        if (!cls) continue;
+        [lines addObject:[NSString stringWithFormat:@"== %@ ==", cn]];
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(cls, &count);
+        int shown = 0;
+        for (unsigned int i = 0; i < count && shown < 20; i++) {
+            NSString *sel = NSStringFromSelector(method_getName(methods[i]));
+            if ([sel rangeOfString:@"userName" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [sel rangeOfString:@"nick" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [sel hasPrefix:@"set"] || [sel hasPrefix:@"init"]) {
+                [lines addObject:[@"  " stringByAppendingString:sel]];
+                shown++;
+            }
+        }
+        free(methods);
+        unsigned int pcount = 0;
+        objc_property_t *props = class_copyPropertyList(cls, &pcount);
+        for (unsigned int i = 0; i < pcount && i < 20; i++) {
+            const char *pname = property_getName(props[i]);
+            if (pname) [lines addObject:[NSString stringWithFormat:@"  prop: %s", pname]];
+        }
+        free(props);
+    }
+
+    // 3. 主界面类（只报关键候选）
     int classCount = objc_getClassList(NULL, 0);
     Class *classes = NULL;
     if (classCount > 0) {
@@ -552,10 +579,9 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     NSMutableArray *frames = [NSMutableArray array];
     for (int i = 0; i < classCount; i++) {
         NSString *name = NSStringFromClass(classes[i]);
-        if ([name rangeOfString:@"MainFrame"].location == NSNotFound) continue;
-        if ([name hasPrefix:@"WA"] || [name hasPrefix:@"NSKVONotifying"]) continue;
-        if ([name rangeOfString:@"View"].location != NSNotFound) continue;
-        [frames addObject:name];
+        if ([name isEqualToString:@"NewMainFrameViewController"]) {
+            [frames addObject:name];
+        }
     }
     free(classes);
     if (frames.count > 0) {
