@@ -59,7 +59,7 @@ static void todoAlert(NSString *msg); // 前向声明
     y += 44 + 12;
 
     // 手势诊断
-    UIButton *diagBtn = [self makeButton:@"🔍 手势诊断（复制到剪贴板）"];
+    UIButton *diagBtn = [self makeButton:@"🔍 诊断（手势+底部菜单，复制到剪贴板）"];
     diagBtn.frame = CGRectMake(x, y, cardW, 44);
     [diagBtn addTarget:self action:@selector(gestureDiagTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.contentView addSubview:diagBtn];

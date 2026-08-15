@@ -364,25 +364,70 @@ static void diagLog(NSString *fmt, ...) {
     NSLog(kAITodoLogPrefix "%@", msg);
 }
 
-// 窗口视图层级里是否存在微信主界面的底部 tab 栏（类名含 TaskBar/TabBar 且贴近窗口底部）
-static BOOL windowHasBottomBar(UIWindow *window) {
-    if (!window) return NO;
+// 找到底部 tab 栏容器（类名含 TaskBar/TabBar 且贴近窗口底部）
+static UIView *findBottomTabContainer(UIWindow *window) {
+    if (!window) return nil;
     NSMutableArray *queue = [NSMutableArray arrayWithObject:window];
+    int scanned = 0;
     while (queue.count > 0) {
         UIView *v = queue.firstObject;
         [queue removeObjectAtIndex:0];
+        if (++scanned > 30000) break;
         NSString *cls = NSStringFromClass([v class]);
         if ([cls rangeOfString:@"TaskBar"].location != NSNotFound ||
             [cls rangeOfString:@"TabBar"].location != NSNotFound) {
             CGRect f = [v convertRect:v.bounds toView:window];
-            if (f.size.height >= 15 && f.size.width > 100 &&
+            if (f.size.height >= 40 && f.size.height <= 110 && f.size.width > 100 &&
                 f.origin.y + f.size.height >= window.bounds.size.height - 20) {
-                return YES;
+                return v;
             }
         }
         [queue addObjectsFromArray:v.subviews];
     }
-    return NO;
+    return nil;
+}
+
+// 从容器里找“一排等宽的 tab 项”（微信是 4 个，横向铺满容器）
+static UIView *g_todoTabItemView = nil; // 我们自己加的“待办”tab（探测时跳过它）
+
+static NSArray *findTabItemRow(UIView *container) {
+    if (!container) return nil;
+    CGFloat cw = container.bounds.size.width;
+    if (cw <= 0) return nil;
+    NSMutableArray *candidates = [NSMutableArray arrayWithObject:container];
+    [candidates addObjectsFromArray:container.subviews];
+    for (UIView *cand in candidates) {
+        NSArray *subs = cand.subviews;
+        if (subs.count < 4 || subs.count > 8) continue;
+        NSMutableArray *items = [NSMutableArray array];
+        for (UIView *s in subs) {
+            if (s == g_todoTabItemView) continue; // 跳过我们自己加的 tab
+            CGRect f = s.frame;
+            if (f.size.width > cw / 8.0 && f.size.width < cw / 2.5 &&
+                f.size.height >= 30 && f.origin.y >= -5 && f.origin.y < cand.bounds.size.height) {
+                [items addObject:s];
+            }
+        }
+        if (items.count != 4) continue;
+        [items sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+            if (a.frame.origin.x < b.frame.origin.x) return NSOrderedAscending;
+            if (a.frame.origin.x > b.frame.origin.x) return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+        UIView *first = items[0];
+        UIView *last = items[3];
+        CGFloat expectW = cw / 4.0;
+        BOOL ok = fabs(first.frame.origin.x - 0) <= cw * 0.05 &&
+                  fabs(last.frame.origin.x + last.frame.size.width - cw) <= cw * 0.08 &&
+                  fabs(first.frame.size.width - expectW) <= cw * 0.12;
+        if (ok) return items;
+    }
+    return nil;
+}
+
+// 窗口视图层级里是否存在微信主界面的底部 tab 栏
+static BOOL windowHasBottomBar(UIWindow *window) {
+    return findBottomTabContainer(window) != nil;
 }
 
 static BOOL g_cachedMainVisible = NO;
@@ -473,6 +518,11 @@ static TodoGestureTarget *g_todoGestureTarget = nil;
     [TodoPageViewController presentFrom:tweakTopViewController()];
 }
 
+- (void)todoTabTapped {
+    diagLog(@"底部菜单「待办」tab 点击");
+    [TodoPageViewController presentFrom:tweakTopViewController()];
+}
+
 @end
 
 static void installTodoGestureAndHint(void) {
@@ -538,6 +588,8 @@ static void installTodoGestureAndHint(void) {
 }
 
 // 手势诊断（设置页按钮调用，结果复制到剪贴板）
+static NSString *todoTabBarProbe(void); // 前向声明（定义在下方）
+
 NSString *todoGestureDiagnostic(void) {
     NSMutableString *s = [NSMutableString string];
     [s appendFormat:@"待办插件 v%@ 手势诊断\n", kAITodoVersion];
@@ -575,7 +627,205 @@ NSString *todoGestureDiagnostic(void) {
             [s appendFormat:@"%@\n", e];
         }
     }
+    [s appendString:@"\n== 底部菜单探测 ==\n"];
+    [s appendString:todoTabBarProbe()];
     return s.length ? s : @"无数据";
+}
+
+#pragma mark - 底部菜单加“待办”tab（第 5 个）
+
+static UIView *g_todoTabContainer = nil;
+static NSArray *g_todoTabItems = nil; // 安装时记住的 4 个原 tab 项
+static BOOL g_tabSwizzled = NO;
+static BOOL g_inTabRelayout = NO;
+static void (*orig_tabLayoutSubviews)(id, SEL);
+
+// 重排：4 个原 tab 各占 1/5，我们的待办 tab 占第 5 个 1/5
+static void relayoutTodoTabItems(void) {
+    UIView *container = g_todoTabContainer;
+    if (!container) return;
+    NSArray *items = g_todoTabItems;
+    if (items.count != 4) return;
+    // 校验引用还在容器上；微信重建子视图时重新探测一次
+    BOOL valid = YES;
+    for (UIView *it in items) {
+        if (it.superview != container) { valid = NO; break; }
+    }
+    if (!valid) {
+        items = findTabItemRow(container);
+        if (items.count != 4) return;
+        g_todoTabItems = items;
+    }
+    CGFloat cw = container.bounds.size.width;
+    if (cw <= 0) return;
+    CGFloat newW = cw / 5.0;
+    for (NSUInteger i = 0; i < items.count; i++) {
+        UIView *it = items[i];
+        CGRect f = it.frame;
+        f.origin.x = i * newW;
+        f.size.width = newW;
+        it.frame = f;
+    }
+    if (g_todoTabItemView) {
+        if (g_todoTabItemView.superview != container) {
+            [container addSubview:g_todoTabItemView]; // 微信重建子视图后补回来
+        }
+        CGRect f = g_todoTabItemView.frame;
+        f.origin.x = 4 * newW;
+        f.size.width = newW;
+        g_todoTabItemView.frame = f;
+        [container bringSubviewToFront:g_todoTabItemView];
+    }
+}
+
+static void swz_tabLayoutSubviews(id self, SEL _cmd) {
+    if (orig_tabLayoutSubviews) orig_tabLayoutSubviews(self, _cmd);
+    if (self == g_todoTabContainer && !g_inTabRelayout) {
+        g_inTabRelayout = YES;
+        @try {
+            relayoutTodoTabItems();
+        } @catch (NSException *e) {}
+        g_inTabRelayout = NO;
+    }
+}
+
+// 生成“待办”tab 项视图（图标 + 文字，点击打开待办页）
+static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
+    UIView *item = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
+    item.userInteractionEnabled = YES;
+
+    CGFloat iconSize = 40.0;
+    CGFloat iconY = 6.0;
+    if (height < 55) iconY = 2.0;
+    UIImageView *iv = [[UIImageView alloc]
+                       initWithFrame:CGRectMake((width - iconSize) / 2.0, iconY, iconSize, iconSize)];
+    iv.contentMode = UIViewContentModeScaleAspectFit;
+    UIImage *icon = [UIImage systemImageNamed:@"checklist"];
+    if (icon) {
+        iv.image = [icon imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    } else {
+        iv.image = [UIImage systemImageNamed:@"square.and.pencil"];
+    }
+    iv.tintColor = [UIColor systemGrayColor];
+    [item addSubview:iv];
+
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 20, width, 14)];
+    label.text = @"待办";
+    label.font = [UIFont systemFontOfSize:10];
+    label.textColor = [UIColor systemGrayColor];
+    label.textAlignment = NSTextAlignmentCenter;
+    [item addSubview:label];
+
+    UITapGestureRecognizer *tap =
+        [[UITapGestureRecognizer alloc] initWithTarget:g_todoGestureTarget
+                                                action:@selector(todoTabTapped)];
+    [item addGestureRecognizer:tap];
+    return item;
+}
+
+// 结构匹配才加：容器 + 恰好 4 个等宽 tab 项，否则静默跳过（诊断里能看到原因）
+static void installTodoTabItem(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_todoTabItemView) return;
+        UIWindow *window = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
+        if (!window) return;
+        UIView *container = findBottomTabContainer(window);
+        if (!container) return;
+        NSArray *items = findTabItemRow(container);
+        if (items.count != 4) return;
+
+        if (!g_todoGestureTarget) {
+            g_todoGestureTarget = [[TodoGestureTarget alloc] init];
+        }
+        UIView *first = items[0];
+        CGFloat newW = container.bounds.size.width / 5.0;
+        g_todoTabItems = items;
+        g_todoTabItemView = makeTodoTabItemView(newW, first.frame.size.height);
+        g_todoTabItemView.frame = CGRectMake(4 * newW, first.frame.origin.y, newW, first.frame.size.height);
+        [container addSubview:g_todoTabItemView];
+        g_todoTabContainer = container;
+        relayoutTodoTabItems();
+
+        // 微信自己重排后自动恢复我们的布局（只 swizzle 一次）
+        Class cls = [container class];
+        if (!g_tabSwizzled) {
+            Method m = class_getInstanceMethod(cls, @selector(layoutSubviews));
+            if (m) {
+                orig_tabLayoutSubviews = (void *)method_getImplementation(m);
+                method_setImplementation(m, (IMP)swz_tabLayoutSubviews);
+                g_tabSwizzled = YES;
+            }
+        }
+        diagLog(@"底部菜单已加第5个tab（容器=%@ 原项=%lu）",
+                NSStringFromClass(cls), (unsigned long)items.count);
+    });
+}
+
+// 底部菜单结构探测（诊断用，结果进剪贴板）
+static NSString *todoTabBarProbe(void) {
+    NSMutableString *s = [NSMutableString string];
+    UIWindow *win = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
+    [s appendFormat:@"窗口: %@\n", win ? NSStringFromClass([win class]) : @"无"];
+    if (!win) return s;
+
+    NSMutableArray *queue = [NSMutableArray arrayWithObject:win];
+    int scanned = 0;
+    int shown = 0;
+    while (queue.count > 0 && shown < 20) {
+        UIView *v = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (++scanned > 30000) break;
+        NSString *cls = NSStringFromClass([v class]);
+        if ([cls rangeOfString:@"TaskBar"].location != NSNotFound ||
+            [cls rangeOfString:@"TabBar"].location != NSNotFound ||
+            [cls rangeOfString:@"MainFrameItem"].location != NSNotFound ||
+            [cls rangeOfString:@"CustomBar"].location != NSNotFound) {
+            CGRect f = [v convertRect:v.bounds toView:win];
+            [s appendFormat:@"%@ frame=(%.0f,%.0f,%.0f,%.0f) 子视图=%lu\n",
+             cls, f.origin.x, f.origin.y, f.size.width, f.size.height,
+             (unsigned long)v.subviews.count];
+            shown++;
+            for (UIView *sv in v.subviews) {
+                CGRect sf = [sv convertRect:sv.bounds toView:win];
+                [s appendFormat:@"  ├ %@ frame=(%.0f,%.0f,%.0f,%.0f) 子=%lu\n",
+                 NSStringFromClass([sv class]), sf.origin.x, sf.origin.y,
+                 sf.size.width, sf.size.height, (unsigned long)sv.subviews.count];
+            }
+        }
+        [queue addObjectsFromArray:v.subviews];
+    }
+
+    UIView *container = findBottomTabContainer(win);
+    [s appendFormat:@"tab 容器: %@\n", container ? NSStringFromClass([container class]) : @"未找到"];
+    if (container) {
+        NSArray *items = findTabItemRow(container);
+        [s appendFormat:@"等宽 tab 项: %lu 个\n", (unsigned long)items.count];
+        for (UIView *it in items) {
+            [s appendFormat:@"  %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
+             NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
+             it.frame.size.width, it.frame.size.height];
+        }
+    }
+    // 兜底：不依赖类名，按位置找底部条（防止 tab 栏类名和猜测不一致）
+    [s appendString:@"\n按位置找底部条（高40-120、贴底，最多8个）:\n"];
+    NSMutableArray *queue2 = [NSMutableArray arrayWithObject:win];
+    int scanned2 = 0;
+    int shown2 = 0;
+    while (queue2.count > 0 && shown2 < 8) {
+        UIView *v = queue2.firstObject;
+        [queue2 removeObjectAtIndex:0];
+        if (++scanned2 > 30000) break;
+        CGRect f = [v convertRect:v.bounds toView:win];
+        if (f.size.height >= 40 && f.size.height <= 120 && f.size.width > 150 &&
+            f.origin.y + f.size.height >= win.bounds.size.height - 12) {
+            [s appendFormat:@"  %@ frame=(%.0f,%.0f,%.0f,%.0f) 子=%lu\n",
+             NSStringFromClass([v class]), f.origin.x, f.origin.y,
+             f.size.width, f.size.height, (unsigned long)v.subviews.count];
+            shown2++;
+        }
+        [queue2 addObjectsFromArray:v.subviews];
+    }
+    return s;
 }
 
 // 定时刷新当前账号（多账号隔离），同时兜底触发旧联系人清理
@@ -656,6 +906,15 @@ static void WeChatTodoInit(void) {
         registerWithWCPlugins(10);
         installHooks();
         installTodoGestureAndHint();
+        // 底部菜单加“待办”tab：微信结构加载较慢，分几次尝试
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ installTodoTabItem(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ installTodoTabItem(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ installTodoTabItem(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(24.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ installTodoTabItem(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             NSString *usr = wechatSelfUsrName();
@@ -671,5 +930,6 @@ static void WeChatTodoInit(void) {
         registerWithWCPlugins(10);
         installHooks();
         installTodoGestureAndHint();
+        installTodoTabItem();
     });
 }
