@@ -506,47 +506,31 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 + (NSString *)uiProbeDiagnostic {
     NSMutableArray *lines = [NSMutableArray array];
 
-    // 1. 已加载类里找主界面/会话管理候选
-    int classCount = objc_getClassList(NULL, 0);
-    Class *classes = NULL;
-    if (classCount > 0) {
-        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
-        objc_getClassList(classes, classCount);
-    }
-    for (int i = 0; i < classCount; i++) {
-        NSString *name = NSStringFromClass(classes[i]);
-        if ([name rangeOfString:@"MainFrame"].location != NSNotFound) {
-            [lines addObject:[NSString stringWithFormat:@"主界面类: %@", name]];
-        } else if ([name rangeOfString:@"SessionMgr"].location != NSNotFound) {
-            [lines addObject:[NSString stringWithFormat:@"会话管理: %@", name]];
-        }
-    }
-    free(classes);
-
-    // 2. ChatViewController 是否存在 + 常见初始化 selector
+    // 1. ChatViewController 是否存在 + 常见初始化 selector（最优先）
     Class chatCls = NSClassFromString(@"ChatViewController");
     if (chatCls) {
-        [lines addObject:@"ChatViewController 存在"];
+        [lines addObject:@"== ChatViewController =="];
         NSArray *sels = @[@"initWithContactName:", @"setContactName:", @"setUserName:",
-                          @"initWithUserName:", @"initWithChatRoomName:", @"initWithChatName:"];
+                          @"initWithUserName:", @"initWithChatRoomName:", @"initWithChatName:",
+                          @"initWithContact:", @"setContact:"];
         for (NSString *s in sels) {
             if ([chatCls instancesRespondToSelector:NSSelectorFromString(s)]) {
                 [lines addObject:[@"  ✔ " stringByAppendingString:s]];
             }
         }
     } else {
-        [lines addObject:@"ChatViewController 未加载（可能需先打开任意聊天）"];
+        [lines addObject:@"== ChatViewController 未加载（先打开任意聊天再探测）=="];
     }
 
-    // 3. 会话管理类的方法（含 session/add/create/insert）
-    for (NSString *cn in @[@"MMSessionMgr", @"MMNewSessionMgr"]) {
+    // 2. 会话管理类的方法（含 session/add/create/insert）
+    for (NSString *cn in @[@"MainSessionMgr", @"MMNewSessionMgr"]) {
         Class cls = NSClassFromString(cn);
         if (!cls) continue;
-        [lines addObject:[NSString stringWithFormat:@"%@ 方法:", cn]];
+        [lines addObject:[NSString stringWithFormat:@"== %@ ==", cn]];
         unsigned int count = 0;
         Method *methods = class_copyMethodList(cls, &count);
         int shown = 0;
-        for (unsigned int i = 0; i < count && shown < 25; i++) {
+        for (unsigned int i = 0; i < count && shown < 30; i++) {
             NSString *sel = NSStringFromSelector(method_getName(methods[i]));
             BOOL hit = [sel rangeOfString:@"session" options:NSCaseInsensitiveSearch].location != NSNotFound ||
                        [sel hasPrefix:@"add"] || [sel hasPrefix:@"create"] || [sel hasPrefix:@"insert"];
@@ -558,10 +542,29 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         free(methods);
     }
 
+    // 3. 主界面类（只报关键候选，过滤 WA/NSKVONotifying/View 噪音）
+    int classCount = objc_getClassList(NULL, 0);
+    Class *classes = NULL;
+    if (classCount > 0) {
+        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
+        objc_getClassList(classes, classCount);
+    }
+    NSMutableArray *frames = [NSMutableArray array];
+    for (int i = 0; i < classCount; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name rangeOfString:@"MainFrame"].location == NSNotFound) continue;
+        if ([name hasPrefix:@"WA"] || [name hasPrefix:@"NSKVONotifying"]) continue;
+        if ([name rangeOfString:@"View"].location != NSNotFound) continue;
+        [frames addObject:name];
+    }
+    free(classes);
+    if (frames.count > 0) {
+        [lines addObject:@"== 主界面候选 =="];
+        [lines addObject:[frames componentsJoinedByString:@"、"]];
+    }
+
     NSString *full = [lines componentsJoinedByString:@"\n"];
-    if (full.length == 0) return @"未找到相关类（可能类未加载）";
-    if (full.length > 2500) full = [full substringToIndex:2500];
-    return full;
+    return full.length ? full : @"无结果";
 }
 
 @end
