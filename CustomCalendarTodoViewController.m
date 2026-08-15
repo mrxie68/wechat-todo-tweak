@@ -9,7 +9,7 @@
 @property (nonatomic, strong) UILabel *weekLabel;
 @property (nonatomic, strong) UILabel *dayLabel;
 @property (nonatomic, strong) UIView *dotView;
-- (void)setDay:(NSDate *)day selected:(BOOL)selected isToday:(BOOL)isToday;
+- (void)setDay:(NSDate *)day selected:(BOOL)selected isToday:(BOOL)isToday hasTodos:(BOOL)hasTodos;
 @end
 
 @implementation CalendarDayCell
@@ -42,7 +42,7 @@
     _dotView.frame = CGRectMake((w - 4) / 2.0, 64, 4, 4);
 }
 
-- (void)setDay:(NSDate *)day selected:(BOOL)selected isToday:(BOOL)isToday {
+- (void)setDay:(NSDate *)day selected:(BOOL)selected isToday:(BOOL)isToday hasTodos:(BOOL)hasTodos {
     NSDateFormatter *wf = [[NSDateFormatter alloc] init];
     wf.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
     wf.dateFormat = @"EEE";
@@ -61,7 +61,19 @@
         _dayLabel.textColor = isToday ? kAITodoAccentColor : [UIColor labelColor];
         _dotView.backgroundColor = kAITodoAccentColor;
     }
-    _dotView.hidden = !isToday; // 小黄点只标今天
+    // 圆点规则：今天=橙色；其它天有待办=淡绿；选中态圆点反白
+    if (selected) {
+        _dotView.backgroundColor = [UIColor systemBackgroundColor];
+        _dotView.hidden = NO;
+    } else if (isToday) {
+        _dotView.backgroundColor = kAITodoAccentColor;
+        _dotView.hidden = NO;
+    } else if (hasTodos) {
+        _dotView.backgroundColor = [UIColor colorWithRed:0.45 green:0.82 blue:0.55 alpha:1.0];
+        _dotView.hidden = NO;
+    } else {
+        _dotView.hidden = YES;
+    }
 }
 
 @end
@@ -87,6 +99,7 @@
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, strong) NSArray<MainTodoItem *> *listTodos;
 @property (nonatomic, assign) BOOL didInitialScroll;
+@property (nonatomic, strong) NSSet *daysWithTodos;
 @end
 
 @implementation CustomCalendarTodoViewController
@@ -112,6 +125,7 @@
     [self buildCalendar];
     [self buildList];
     [self rebuildDays];
+    [self refreshDaysWithTodos];
     [self reloadList];
 }
 
@@ -297,6 +311,7 @@
 - (void)reloadList {
     self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
     [self.tableView reloadData];
+    [self refreshDaysWithTodos];
 
     NSCalendar *cal = [NSCalendar currentCalendar];
     BOOL isToday = [[cal startOfDayForDate:self.selectedDay] isEqualToDate:
@@ -316,6 +331,17 @@
     self.tableView.hidden = empty;
     self.emptyLabel.hidden = !empty;
     self.emptyLabel.text = @"这一天还没有待办\n点右上角 + 添加一条";
+}
+
+- (void)refreshDaysWithTodos {
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSMutableSet *set = [NSMutableSet set];
+    for (MainTodoItem *m in [AITodoManager allTodos]) {
+        NSDate *start = [cal startOfDayForDate:m.createTime];
+        [set addObject:@([start timeIntervalSince1970])];
+    }
+    self.daysWithTodos = set;
+    [self.calendarView reloadData];
 }
 
 #pragma mark - 交互
@@ -465,6 +491,8 @@
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *action) {
         [AITodoManager addSubTask:al.textFields.firstObject.text toTodo:todo.identifier];
+        // 加完自动展开，让子任务立刻可见（否则看不见会重复点添加）
+        [AITodoManager setTodo:todo.identifier selected:YES];
         [self reloadList];
     }]];
     [self presentViewController:al animated:YES completion:nil];
@@ -486,7 +514,9 @@
                      [cal startOfDayForDate:self.selectedDay]];
     BOOL isToday = [[cal startOfDayForDate:day] isEqualToDate:
                     [cal startOfDayForDate:[NSDate date]]];
-    [cell setDay:day selected:selected isToday:isToday];
+    BOOL hasTodos = [self.daysWithTodos containsObject:
+                     @([[cal startOfDayForDate:day] timeIntervalSince1970])];
+    [cell setDay:day selected:selected isToday:isToday hasTodos:hasTodos];
     return cell;
 }
 

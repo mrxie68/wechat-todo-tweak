@@ -16,6 +16,9 @@ static UIColor *cardSelectedColor(void) {
     return [UIColor colorWithRed:0.68 green:0.53 blue:0.40 alpha:1.0]; // 棕色
 }
 
+@interface CustomTodoTableViewCell () <UIGestureRecognizerDelegate>
+@end
+
 @implementation CustomTodoTableViewCell
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style
@@ -60,9 +63,11 @@ static UIColor *cardSelectedColor(void) {
 
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
                                                                              action:@selector(cardTapped)];
+        tap.delegate = self;
         [self.cardView addGestureRecognizer:tap];
         UILongPressGestureRecognizer *longPress =
             [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(cardLongPressed:)];
+        longPress.delegate = self;
         [self.cardView addGestureRecognizer:longPress];
 
         _subRows = [NSMutableArray array];
@@ -132,6 +137,9 @@ static UIColor *cardSelectedColor(void) {
             check.tag = 1;
             [check addTarget:self action:@selector(subCheckTapped:) forControlEvents:UIControlEventTouchUpInside];
             [row addSubview:check];
+            UITapGestureRecognizer *rowTap =
+                [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(subRowTapped:)];
+            [row addGestureRecognizer:rowTap];
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
             label.tag = 2;
             label.font = [UIFont systemFontOfSize:13];
@@ -155,6 +163,23 @@ static UIColor *cardSelectedColor(void) {
     if (idx != NSNotFound && idx < _todo.subTasks.count) {
         if (self.onToggleSubTask) self.onToggleSubTask(_todo.subTasks[idx]);
     }
+}
+
+- (void)subRowTapped:(UITapGestureRecognizer *)gesture {
+    NSUInteger idx = [_subRows indexOfObject:gesture.view];
+    if (idx != NSNotFound && idx < _todo.subTasks.count) {
+        if (self.onToggleSubTask) self.onToggleSubTask(_todo.subTasks[idx]);
+    }
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+       shouldReceiveTouch:(UITouch *)touch {
+    // 按钮（加号/书签/勾选）和子任务行上的触摸不触发卡片展开/长按
+    if ([touch.view isKindOfClass:[UIControl class]]) return NO;
+    for (UIView *row in _subRows) {
+        if ([touch.view isDescendantOfView:row]) return NO;
+    }
+    return YES;
 }
 
 - (void)layoutSubviews {
