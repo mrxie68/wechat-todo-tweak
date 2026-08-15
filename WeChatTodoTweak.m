@@ -68,6 +68,11 @@
 - (void)registerSwitchWithTitle:(NSString *)title key:(NSString *)key;
 @end
 
+@interface MMNewSessionMgr : NSObject
+- (id)AddOrModifySession:(id)session withNotifyFlag:(BOOL)flag immediateRefresh:(BOOL)refresh;
+- (void)DeleteSessionOfUser:(NSString *)userName;
+@end
+
 static NSString *ensureTodoSessionDiagnostic(void); // 前向声明（定义在下方）
 static NSString *aiMD5Hex(NSString *input);
 static NSArray *aiFindDatabaseFiles(void);
