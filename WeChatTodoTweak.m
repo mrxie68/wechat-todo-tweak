@@ -1,0 +1,522 @@
+//
+//  WeChatTodoTweak.m
+//  待办事项插件（微信 + Memos）
+//
+//  纯 Objective-C 运行时实现，不依赖 CydiaSubstrate / Theos：
+//    - TrollStore + TrollFools 直接注入微信
+//    - 越狱环境放进 DynamicLibraries 由 MobileSubstrate 加载
+//
+
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+#import <time.h>
+#import <stdlib.h>
+#import <string.h>
+#import <sqlite3.h>
+#import <CommonCrypto/CommonDigest.h>
+#import "AIConfig.h"
+#import "AISettings.h"
+#import "AITodoManager.h"
+#import "TodoSettingsViewController.h"
+
+#pragma mark - 微信私有接口声明
+
+@interface CMessageWrap : NSObject
+@property (nonatomic, retain) NSString *m_nsContent;
+@property (nonatomic, retain) NSString *m_nsFromUsr;
+@property (nonatomic, retain) NSString *m_nsToUsr;
+@property (nonatomic, assign) long long m_nsMsgSvrID;
+@property (nonatomic, assign) unsigned int m_uiMessageType;
+@property (nonatomic, assign) unsigned int m_uiCreateTime;
+@property (nonatomic, assign) unsigned int m_uiStatus;
+- (id)initWithMsgType:(long long)type;
+- (id)initWithMsgType:(long long)type nsFromUsr:(NSString *)fromUsr;
+@end
+
+@interface CMessageMgr : NSObject
+- (void)AsyncOnAddMsg:(id)arg1 MsgWrap:(CMessageWrap *)wrap;
+- (void)MainThreadNotifyToExt:(NSDictionary *)ext;
+- (void)SendTextMessage:(NSString *)content toUsrName:(NSString *)usrName;
+- (void)SendMessage:(id)msgWrap isSendByWeChat:(BOOL)flag;
+- (void)AddMsg:(NSString *)chatId MsgWrap:(CMessageWrap *)wrap;
+@end
+
+#pragma mark - 基础工具
+
+static CMessageMgr *wechatMessageMgr(void) {
+    Class centerCls = NSClassFromString(@"MMServiceCenter");
+    if (!centerCls) return nil;
+    id center = [(id)centerCls defaultCenter];
+    if (!center) return nil;
+    return [center getService:NSClassFromString(@"CMessageMgr")];
+}
+
+static NSString *wechatSelfUsrName(void) {
+    Class centerCls = NSClassFromString(@"MMServiceCenter");
+    if (!centerCls) return nil;
+    id center = [(id)centerCls defaultCenter];
+    if (!center) return nil;
+    id contactMgr = [center getService:NSClassFromString(@"CContactMgr")];
+    NSString *usrName = nil;
+    if ([contactMgr respondsToSelector:@selector(getSelfContact)]) {
+        id selfContact = [contactMgr getSelfContact];
+        if ([selfContact respondsToSelector:@selector(m_nsUsrName)]) {
+            usrName = [selfContact m_nsUsrName];
+        }
+    }
+    if (usrName.length == 0) {
+        Class settingUtil = NSClassFromString(@"SettingUtil");
+        if (settingUtil && [settingUtil respondsToSelector:@selector(getCurUsrName)]) {
+            usrName = [(id)settingUtil getCurUsrName];
+        }
+    }
+    return usrName;
+}
+
+static UIViewController *tweakTopViewController(void) {
+    UIWindow *window = nil;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (w.isKeyWindow) { window = w; break; }
+    }
+    if (!window) window = [UIApplication sharedApplication].windows.firstObject;
+    UIViewController *top = window.rootViewController;
+    while (top.presentedViewController) top = top.presentedViewController;
+    return top;
+}
+
+#pragma mark - 去重（收消息双 hook + 自己回复回显）
+
+static NSObject *g_dedupLock = nil;
+static NSMutableSet *g_seenKeys = nil;
+static NSMutableArray *g_seenOrder = nil;
+static NSObject *g_replyLock = nil;
+static NSMutableSet *g_recentReplies = nil;
+static NSMutableArray *g_recentReplyOrder = nil;
+
+static NSString *messageKey(CMessageWrap *wrap) {
+    if ([wrap respondsToSelector:@selector(m_nsMsgSvrID)]) {
+        @try {
+            long long svrId = [wrap m_nsMsgSvrID];
+            if (svrId != 0) {
+                NSString *from = [wrap m_nsFromUsr] ?: @"";
+                return [NSString stringWithFormat:@"%@|%lld", from, svrId];
+            }
+        } @catch (NSException *e) {}
+    }
+    NSString *from = [wrap m_nsFromUsr] ?: @"";
+    NSString *content = [wrap m_nsContent] ?: @"";
+    unsigned int createTime = 0;
+    if ([wrap respondsToSelector:@selector(m_uiCreateTime)]) {
+        createTime = (unsigned int)[wrap m_uiCreateTime];
+    }
+    return [NSString stringWithFormat:@"%@|%@|%u", from, content, createTime];
+}
+
+static BOOL isDuplicateMessage(CMessageWrap *wrap) {
+    NSString *key = messageKey(wrap);
+    if (key.length == 0) return NO;
+    @synchronized (g_dedupLock) {
+        if ([g_seenKeys containsObject:key]) return YES;
+        [g_seenKeys addObject:key];
+        [g_seenOrder addObject:key];
+        if (g_seenOrder.count > 100) {
+            NSString *oldest = [g_seenOrder firstObject];
+            [g_seenOrder removeObjectAtIndex:0];
+            [g_seenKeys removeObject:oldest];
+        }
+    }
+    return NO;
+}
+
+@interface WeChatTodoHandler : NSObject
++ (void)handleIncomingMessage:(CMessageWrap *)wrap;
++ (void)noteReplySent:(NSString *)text chatId:(NSString *)chatId;
++ (BOOL)isRecentReply:(NSString *)text chatId:(NSString *)chatId;
++ (void)sendReply:(NSString *)text chatId:(NSString *)chatId;
++ (void)presentAlertWithTitle:(NSString *)title message:(NSString *)message;
++ (NSString *)todoSessionDiagnostic;
+@end
+
+@implementation WeChatTodoHandler
+
++ (void)noteReplySent:(NSString *)text chatId:(NSString *)chatId {
+    if (text.length == 0 || chatId.length == 0) return;
+    NSString *key = [NSString stringWithFormat:@"%@|%@", chatId, text];
+    @synchronized (g_replyLock) {
+        if (!g_recentReplies) {
+            g_recentReplies = [NSMutableSet set];
+            g_recentReplyOrder = [NSMutableArray array];
+        }
+        [g_recentReplies addObject:key];
+        [g_recentReplyOrder addObject:key];
+        if (g_recentReplyOrder.count > 40) {
+            NSString *oldest = [g_recentReplyOrder firstObject];
+            [g_recentReplyOrder removeObjectAtIndex:0];
+            [g_recentReplies removeObject:oldest];
+        }
+    }
+}
+
++ (BOOL)isRecentReply:(NSString *)text chatId:(NSString *)chatId {
+    if (text.length == 0 || chatId.length == 0) return NO;
+    NSString *key = [NSString stringWithFormat:@"%@|%@", chatId, text];
+    @synchronized (g_replyLock) {
+        return [g_recentReplies containsObject:key];
+    }
+}
+
++ (void)handleIncomingMessage:(CMessageWrap *)wrap {
+    @try {
+        NSString *selfUsr = wechatSelfUsrName();
+        if (selfUsr.length > 0) [AISettings setCurrentAccount:selfUsr];
+
+        if (![wrap isKindOfClass:NSClassFromString(@"CMessageWrap")]) return;
+        if ([wrap m_uiMessageType] != 1) return; // 只处理文本
+        if (isDuplicateMessage(wrap)) return;
+
+        NSString *content = [wrap m_nsContent];
+        NSString *fromUsr = [wrap m_nsFromUsr];
+        NSString *toUsr = [wrap m_nsToUsr];
+        if (content.length == 0) return;
+
+        BOOL isSelf = (selfUsr.length > 0 && [fromUsr isEqualToString:selfUsr]);
+        NSString *chatId = isSelf ? toUsr : fromUsr;
+        if (![chatId isEqualToString:kAITodoChatId]) return; // 只处理待办对话
+
+        // 自己刚发出的回复回显：跳过，避免把回复再当命令
+        if ([self isRecentReply:content chatId:chatId]) return;
+
+        NSString *reply = [AITodoManager handleCommand:content];
+        if (reply.length > 0) {
+            [self sendReply:reply chatId:kAITodoChatId];
+        }
+    } @catch (NSException *e) {
+        NSLog(kAITodoLogPrefix "处理消息异常: %@", e);
+    }
+}
+
++ (void)sendReply:(NSString *)text chatId:(NSString *)chatId {
+    if (text.length == 0 || chatId.length == 0) return;
+    void (^send)(void) = ^{
+        CMessageMgr *mgr = wechatMessageMgr();
+        if (!mgr) {
+            NSLog(kAITodoLogPrefix "获取 CMessageMgr 失败");
+            return;
+        }
+        [self noteReplySent:text chatId:chatId];
+        BOOL sent = NO;
+        if ([mgr respondsToSelector:@selector(SendTextMessage:toUsrName:)]) {
+            [mgr SendTextMessage:text toUsrName:chatId];
+            sent = YES;
+        } else if ([mgr respondsToSelector:@selector(AddMsg:MsgWrap:)]) {
+            Class wrapCls = NSClassFromString(@"CMessageWrap");
+            if (wrapCls) {
+                NSString *selfUsr = wechatSelfUsrName();
+                CMessageWrap *wrap = nil;
+                if (selfUsr.length > 0) {
+                    wrap = [[wrapCls alloc] initWithMsgType:1 nsFromUsr:selfUsr];
+                } else {
+                    wrap = [[wrapCls alloc] initWithMsgType:1];
+                }
+                if (wrap) {
+                    [wrap setM_nsContent:text];
+                    [wrap setM_nsToUsr:chatId];
+                    [wrap setM_uiMessageType:1];
+                    [wrap setM_uiCreateTime:(unsigned int)time(NULL)];
+                    [wrap setM_uiStatus:1];
+                    [mgr AddMsg:chatId MsgWrap:wrap];
+                    sent = YES;
+                }
+            }
+        } else {
+            CMessageWrap *wrap = [[NSClassFromString(@"CMessageWrap") alloc] init];
+            if (wrap) {
+                [wrap setM_nsContent:text];
+                [wrap setM_nsToUsr:chatId];
+                [wrap setM_uiMessageType:1];
+                id service = mgr;
+                Class serviceCls = NSClassFromString(@"WCMessageService");
+                Class centerCls = NSClassFromString(@"MMServiceCenter");
+                id center = centerCls ? [(id)centerCls defaultCenter] : nil;
+                if (serviceCls && center) {
+                    id s = [center getService:serviceCls];
+                    if (s) service = s;
+                }
+                if ([service respondsToSelector:@selector(SendMessage:isSendByWeChat:)]) {
+                    [service SendMessage:wrap isSendByWeChat:YES];
+                    sent = YES;
+                }
+            }
+        }
+        NSLog(kAITodoLogPrefix "回复待办 %@：%@", sent ? @"成功" : @"失败", text);
+    };
+    if ([NSThread isMainThread]) {
+        send();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), send);
+    }
+}
+
++ (void)presentAlertWithTitle:(NSString *)title message:(NSString *)message {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *top = tweakTopViewController();
+        if (!top) return;
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                       message:message
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+        [top presentViewController:alert animated:YES completion:nil];
+    });
+}
+
++ (NSString *)todoSessionDiagnostic {
+    return ensureTodoSessionDiagnostic();
+}
+
+@end
+
+#pragma mark - 消息 hook
+
+static void (*orig_AsyncOnAddMsg)(id, SEL, id, CMessageWrap *);
+static void (*orig_MainThreadNotifyToExt)(id, SEL, NSDictionary *);
+
+static void swz_AsyncOnAddMsg(id self, SEL _cmd, id arg1, CMessageWrap *wrap) {
+    if (orig_AsyncOnAddMsg) orig_AsyncOnAddMsg(self, _cmd, arg1, wrap);
+    [WeChatTodoHandler handleIncomingMessage:wrap];
+}
+
+static void swz_MainThreadNotifyToExt(id self, SEL _cmd, NSDictionary *ext) {
+    if (orig_MainThreadNotifyToExt) orig_MainThreadNotifyToExt(self, _cmd, ext);
+    @try {
+        if (![ext isKindOfClass:[NSDictionary class]]) return;
+        CMessageWrap *wrap = ext[@"3"];
+        if ([wrap isKindOfClass:NSClassFromString(@"CMessageWrap")]) {
+            [WeChatTodoHandler handleIncomingMessage:wrap];
+        }
+    } @catch (NSException *e) {
+        NSLog(kAITodoLogPrefix "MainThreadNotifyToExt 异常: %@", e);
+    }
+}
+
+#pragma mark - 待办联系人（本机会话）
+
+// —— 数据库工具（只读/只插入待办会话，不修改微信任何其他数据）——
+
+static NSString *aiMD5Hex(NSString *input) {
+    const char *cStr = [input UTF8String];
+    unsigned char digest[CC_MD5_DIGEST_LENGTH];
+    CC_MD5(cStr, (CC_LONG)strlen(cStr), digest);
+    NSMutableString *hex = [NSMutableString string];
+    for (int i = 0; i < CC_MD5_DIGEST_LENGTH; i++) {
+        [hex appendFormat:@"%02x", digest[i]];
+    }
+    return hex;
+}
+
+static BOOL aiIsSQLiteFile(NSString *path) {
+    FILE *f = fopen([path UTF8String], "rb");
+    if (!f) return NO;
+    char buf[16];
+    size_t n = fread(buf, 1, 16, f);
+    fclose(f);
+    return n == 16 && memcmp(buf, "SQLite format 3", 16) == 0;
+}
+
+static NSArray *aiSQLiteTableNames(sqlite3 *db) {
+    NSMutableArray *tables = [NSMutableArray array];
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *t = sqlite3_column_text(stmt, 0);
+            if (t) [tables addObject:[NSString stringWithUTF8String:(const char *)t]];
+        }
+    }
+    sqlite3_finalize(stmt);
+    return tables;
+}
+
+static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table) {
+    NSMutableArray *cols = [NSMutableArray array];
+    NSString *safe = [table stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+    NSString *sql = [NSString stringWithFormat:@"PRAGMA table_info(\"%@\")", safe];
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, [sql UTF8String], -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *c = sqlite3_column_text(stmt, 1);
+            if (c) [cols addObject:[NSString stringWithUTF8String:(const char *)c]];
+        }
+    }
+    sqlite3_finalize(stmt);
+    return cols;
+}
+
+static NSArray *aiFindDatabaseFiles(void) {
+    NSMutableArray *files = [NSMutableArray array];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *home = NSHomeDirectory();
+    NSMutableArray *roots = [NSMutableArray array];
+    NSString *selfUsr = wechatSelfUsrName();
+    NSString *documents = [home stringByAppendingPathComponent:@"Documents"];
+    if (selfUsr.length > 0) {
+        NSString *accountDir = [documents stringByAppendingPathComponent:aiMD5Hex(selfUsr)];
+        if ([fm fileExistsAtPath:accountDir]) [roots addObject:accountDir];
+    }
+    if (roots.count == 0) [roots addObject:documents];
+    [roots addObject:[home stringByAppendingPathComponent:@"Library/Application Support"]];
+    for (NSString *root in roots) {
+        if (![fm fileExistsAtPath:root]) continue;
+        NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+        int scanned = 0;
+        for (NSString *rel in en) {
+            if (++scanned > 30000) break;
+            NSString *ext = rel.pathExtension.lowercaseString;
+            if (!([ext isEqualToString:@"sqlite"] || [ext isEqualToString:@"sqlite3"] ||
+                  [ext isEqualToString:@"db"])) continue;
+            NSString *full = [root stringByAppendingPathComponent:rel];
+            if (!aiIsSQLiteFile(full)) continue;
+            NSDictionary *attrs = [fm attributesOfItemAtPath:full error:nil];
+            [files addObject:@{@"path": full, @"size": attrs[NSFileSize] ?: @0}];
+            if (files.count >= 25) break;
+        }
+    }
+    [files sortUsingComparator:^NSComparisonResult(id a, id b) {
+        return [b[@"size"] compare:a[@"size"]];
+    }];
+    return files;
+}
+
+// 在会话库里插入“待办事项”本机会话（只在表里有 UserName 列时才写，写失败不影响微信）
++ (NSString *)ensureTodoSessionDiagnostic {
+    NSArray *dbs = aiFindDatabaseFiles();
+    for (NSDictionary *d in dbs) {
+        sqlite3 *db = NULL;
+        if (sqlite3_open_v2([d[@"path"] UTF8String], &db,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
+            if (db) sqlite3_close(db);
+            continue;
+        }
+        sqlite3_busy_timeout(db, 3000);
+        NSArray *tables = aiSQLiteTableNames(db);
+        for (NSString *tbl in tables) {
+            if ([tbl.lowercaseString rangeOfString:@"session"].location == NSNotFound) continue;
+            NSArray *cols = aiSQLiteColumns(db, tbl);
+            if (![cols containsObject:@"UserName"]) continue;
+            NSString *nickCol = [cols containsObject:@"NickName"] ? @"NickName" : nil;
+            // 已存在？
+            NSString *existsSql = [NSString stringWithFormat:
+                                   @"SELECT COUNT(*) FROM \"%@\" WHERE \"UserName\" = ?", tbl];
+            sqlite3_stmt *stmt = NULL;
+            int count = 0;
+            if (sqlite3_prepare_v2(db, [existsSql UTF8String], -1, &stmt, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(stmt) == SQLITE_ROW) {
+                    count = sqlite3_column_int(stmt, 0);
+                }
+            }
+            sqlite3_finalize(stmt);
+            if (count > 0) {
+                sqlite3_close(db);
+                return [NSString stringWithFormat:@"待办联系人已存在（表 %@）", tbl];
+            }
+            // 插入
+            NSString *colsSql = nickCol
+                ? @"\"UserName\", \"NickName\""
+                : @"\"UserName\"";
+            NSString *valsSql = nickCol ? @"?, ?" : @"?";
+            NSString *insertSql = [NSString stringWithFormat:
+                                   @"INSERT INTO \"%@\" (%@) VALUES (%@)", tbl, colsSql, valsSql];
+            sqlite3_stmt *istmt = NULL;
+            int rc = sqlite3_prepare_v2(db, [insertSql UTF8String], -1, &istmt, NULL);
+            if (rc == SQLITE_OK) {
+                sqlite3_bind_text(istmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
+                if (nickCol) {
+                    sqlite3_bind_text(istmt, 2, [kAITodoNickName UTF8String], -1, SQLITE_TRANSIENT);
+                }
+                rc = sqlite3_step(istmt);
+            }
+            sqlite3_finalize(istmt);
+            sqlite3_close(db);
+            if (rc == SQLITE_DONE) {
+                return [NSString stringWithFormat:@"✅ 待办联系人已创建（表 %@）", tbl];
+            }
+            return [NSString stringWithFormat:@"⚠️ 插入失败（表 %@，rc=%d）：可能需要更多字段，见日志",
+                    tbl, rc];
+        }
+        sqlite3_close(db);
+    }
+    return @"未找到会话库（表名不含 session）";
+}
+
+#pragma mark - hook 安装 / wcplugins 注册
+
+static int installHooks(void) {
+    Class cls = NSClassFromString(@"CMessageMgr");
+    if (!cls) return 0;
+    Method recvMethod = class_getInstanceMethod(cls, @selector(AsyncOnAddMsg:MsgWrap:));
+    if (recvMethod) {
+        orig_AsyncOnAddMsg = (void *)method_getImplementation(recvMethod);
+        method_setImplementation(recvMethod, (IMP)swz_AsyncOnAddMsg);
+    }
+    Method extMethod = class_getInstanceMethod(cls, @selector(MainThreadNotifyToExt:));
+    if (extMethod) {
+        orig_MainThreadNotifyToExt = (void *)method_getImplementation(extMethod);
+        method_setImplementation(extMethod, (IMP)swz_MainThreadNotifyToExt);
+    }
+    return 1;
+}
+
+static void retryInstall(int remaining) {
+    if (installHooks()) return;
+    if (remaining <= 0) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        retryInstall(remaining - 1);
+    });
+}
+
+static void registerWithWCPlugins(int remaining) {
+    Class mgrClass = NSClassFromString(@"WCPluginsMgr");
+    if (mgrClass && [mgrClass respondsToSelector:@selector(sharedInstance)]) {
+        id mgr = [mgrClass sharedInstance];
+        if (mgr && [mgr respondsToSelector:@selector(registerControllerWithTitle:version:controller:)]) {
+            [mgr registerControllerWithTitle:@"待办事项"
+                                     version:kAITodoVersion
+                                  controller:@"TodoSettingsViewController"];
+            NSLog(kAITodoLogPrefix "已注册到 wcplugins（设置页条目）");
+            return;
+        }
+    }
+    if (remaining <= 0) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        registerWithWCPlugins(remaining - 1);
+    });
+}
+
+__attribute__((constructor))
+static void WeChatTodoInit(void) {
+    NSLog(kAITodoLogPrefix "待办事项插件已加载…");
+    g_dedupLock = [[NSObject alloc] init];
+    g_seenKeys = [NSMutableSet set];
+    g_seenOrder = [NSMutableArray array];
+    g_replyLock = [[NSObject alloc] init];
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"UIApplicationDidFinishLaunchingNotification"
+                                                      object:nil
+                                                       queue:nil
+                                                  usingBlock:^(NSNotification *note) {
+        retryInstall(10);
+        registerWithWCPlugins(10);
+        // 启动后稍等，再尝试创建待办联系人（后台，失败不影响微信）
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
+                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+            NSString *diag = ensureTodoSessionDiagnostic();
+            NSLog(kAITodoLogPrefix "待办联系人创建结果: %@", diag);
+        });
+    }];
+
+    retryInstall(10);
+    registerWithWCPlugins(10);
+}
