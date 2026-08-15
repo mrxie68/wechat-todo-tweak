@@ -589,6 +589,79 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         [lines addObject:[frames componentsJoinedByString:@"、"]];
     }
 
+    // 4. 聊天界面类（名字含 Chat + ViewController，打开过聊天后应该已加载）
+    NSMutableArray *chatVCs = [NSMutableArray array];
+    classCount = objc_getClassList(NULL, 0);
+    if (classCount > 0) {
+        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
+        objc_getClassList(classes, classCount);
+    }
+    for (int i = 0; i < classCount; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name rangeOfString:@"Chat"].location != NSNotFound &&
+            [name rangeOfString:@"ViewController"].location != NSNotFound &&
+            [name rangeOfString:@"NSKVONotifying"].location == NSNotFound) {
+            [chatVCs addObject:name];
+        }
+    }
+    free(classes);
+    if (chatVCs.count > 0) {
+        [lines addObject:@"== 聊天界面类 =="];
+        [lines addObject:[chatVCs componentsJoinedByString:@"、"]];
+    } else {
+        [lines addObject:@"== 聊天界面类：未找到（打开聊天后再探测）=="];
+    }
+
+    // 5. 会话对象类（名字含 Session、非 Mgr，且带 userName/nick 属性或方法）
+    NSMutableArray *sessionClasses = [NSMutableArray array];
+    classCount = objc_getClassList(NULL, 0);
+    if (classCount > 0) {
+        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
+        objc_getClassList(classes, classCount);
+    }
+    for (int i = 0; i < classCount; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name rangeOfString:@"Session"].location == NSNotFound) continue;
+        if ([name rangeOfString:@"Mgr"].location != NSNotFound) continue;
+        if ([name hasPrefix:@"NSKVONotifying"] || [name hasPrefix:@"WK"] || [name hasPrefix:@"WCSession"]) continue;
+        Class c = classes[i];
+        BOOL useful = NO;
+        unsigned int pcount = 0;
+        objc_property_t *props = class_copyPropertyList(c, &pcount);
+        for (unsigned int j = 0; j < pcount; j++) {
+            const char *pn = property_getName(props[j]);
+            if (!pn) continue;
+            NSString *ps = [NSString stringWithUTF8String:pn];
+            if ([ps rangeOfString:@"userName" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [ps rangeOfString:@"nick" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                useful = YES;
+                break;
+            }
+        }
+        free(props);
+        if (!useful) {
+            unsigned int mcount = 0;
+            Method *methods = class_copyMethodList(c, &mcount);
+            for (unsigned int j = 0; j < mcount; j++) {
+                NSString *sel = NSStringFromSelector(method_getName(methods[j]));
+                if ([sel rangeOfString:@"userName" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                    [sel rangeOfString:@"setNick" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    useful = YES;
+                    break;
+                }
+            }
+            free(methods);
+        }
+        if (useful) [sessionClasses addObject:name];
+    }
+    free(classes);
+    if (sessionClasses.count > 0) {
+        [lines addObject:@"== 会话对象候选 =="];
+        [lines addObject:[sessionClasses componentsJoinedByString:@"、"]];
+    } else {
+        [lines addObject:@"== 会话对象候选：未找到带 userName 的类 =="];
+    }
+
     NSString *full = [lines componentsJoinedByString:@"\n"];
     return full.length ? full : @"无结果";
 }
