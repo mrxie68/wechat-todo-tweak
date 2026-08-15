@@ -129,7 +129,7 @@
     [sessionCard addSubview:self.sessionStatusLabel];
     UIButton *createBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     createBtn.frame = CGRectMake(16, 76, cardW - 32, 28);
-    [createBtn setTitle:@"创建 / 检查待办联系人" forState:UIControlStateNormal];
+    [createBtn setTitle:@"检查待办联系人（只读探测）" forState:UIControlStateNormal];
     [createBtn addTarget:self action:@selector(checkSessionTapped) forControlEvents:UIControlEventTouchUpInside];
     [sessionCard addSubview:createBtn];
     y += 110 + 12;

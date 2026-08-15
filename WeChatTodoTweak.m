@@ -422,14 +422,15 @@ static NSArray *aiFindDatabaseFiles(void) {
     return files;
 }
 
-// 在会话库里插入“待办事项”本机会话（只在表里有 UserName 列时才写，写失败不影响微信）
+// 只读探测会话库结构（绝不写微信数据库，避免闪退/损坏）。
+// 待办联系人的展示后续改用 UI 插行方案，不走数据库写入。
 static NSString *ensureTodoSessionDiagnostic(void) {
     NSMutableArray *candidateTables = [NSMutableArray array];
     NSArray *dbs = aiFindDatabaseFiles();
     for (NSDictionary *d in dbs) {
         sqlite3 *db = NULL;
         if (sqlite3_open_v2([d[@"path"] UTF8String], &db,
-                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
+                            SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) != SQLITE_OK) {
             if (db) sqlite3_close(db);
             continue;
         }
@@ -439,62 +440,19 @@ static NSString *ensureTodoSessionDiagnostic(void) {
             NSString *lower = tbl.lowercaseString;
             BOOL isSessionLike = [lower rangeOfString:@"session"].location != NSNotFound;
             BOOL isChatLike = [lower rangeOfString:@"chat"].location != NSNotFound;
-            if (!isSessionLike && !isChatLike) continue;
-            NSArray *cols = aiSQLiteColumns(db, tbl);
-            if (![cols containsObject:@"UserName"]) continue;
-            if (!isSessionLike) {
+            if (isSessionLike || isChatLike) {
                 [candidateTables addObject:[NSString stringWithFormat:@"%@(%@)", tbl,
                                             [d[@"path"] lastPathComponent]]];
                 continue;
             }
-            NSString *nickCol = [cols containsObject:@"NickName"] ? @"NickName" : nil;
-            // 已存在？
-            NSString *existsSql = [NSString stringWithFormat:
-                                   @"SELECT COUNT(*) FROM \"%@\" WHERE \"UserName\" = ?", tbl];
-            sqlite3_stmt *stmt = NULL;
-            int count = 0;
-            if (sqlite3_prepare_v2(db, [existsSql UTF8String], -1, &stmt, NULL) == SQLITE_OK) {
-                sqlite3_bind_text(stmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
-                if (sqlite3_step(stmt) == SQLITE_ROW) {
-                    count = sqlite3_column_int(stmt, 0);
-                }
-            }
-            sqlite3_finalize(stmt);
-            if (count > 0) {
-                sqlite3_close(db);
-                return [NSString stringWithFormat:@"待办联系人已存在（表 %@）", tbl];
-            }
-            // 插入
-            NSString *colsSql = nickCol
-                ? @"\"UserName\", \"NickName\""
-                : @"\"UserName\"";
-            NSString *valsSql = nickCol ? @"?, ?" : @"?";
-            NSString *insertSql = [NSString stringWithFormat:
-                                   @"INSERT INTO \"%@\" (%@) VALUES (%@)", tbl, colsSql, valsSql];
-            sqlite3_stmt *istmt = NULL;
-            int rc = sqlite3_prepare_v2(db, [insertSql UTF8String], -1, &istmt, NULL);
-            if (rc == SQLITE_OK) {
-                sqlite3_bind_text(istmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
-                if (nickCol) {
-                    sqlite3_bind_text(istmt, 2, [kAITodoNickName UTF8String], -1, SQLITE_TRANSIENT);
-                }
-                rc = sqlite3_step(istmt);
-            }
-            sqlite3_finalize(istmt);
-            sqlite3_close(db);
-            if (rc == SQLITE_DONE) {
-                return [NSString stringWithFormat:@"✅ 待办联系人已创建（表 %@）", tbl];
-            }
-            return [NSString stringWithFormat:@"⚠️ 插入失败（表 %@，rc=%d）：可能需要更多字段，见日志",
-                    tbl, rc];
         }
         sqlite3_close(db);
     }
     if (candidateTables.count > 0) {
-        return [NSString stringWithFormat:@"未找到会话表（session），找到含 chat 且有 UserName 的表：%@",
+        return [NSString stringWithFormat:@"只读探测：找到候选表 %@；写入已禁用（防闪退），待办联系人将改用 UI 插行方案。",
                 [candidateTables componentsJoinedByString:@"、"]];
     }
-    return @"未找到会话库（扫描到的表里没有 session/chat 相关表）";
+    return @"只读探测：未找到 session/chat 相关表；写入已禁用（防闪退）。";
 }
 
 #pragma mark - hook 安装 / wcplugins 注册
@@ -560,12 +518,6 @@ static void WeChatTodoInit(void) {
                                                   usingBlock:^(NSNotification *note) {
         retryInstall(10);
         registerWithWCPlugins(10);
-        // 启动后稍等，再尝试创建待办联系人（后台，失败不影响微信）
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-            NSString *diag = ensureTodoSessionDiagnostic();
-            NSLog(kAITodoLogPrefix "待办联系人创建结果: %@", diag);
-        });
     }];
 
     retryInstall(10);
