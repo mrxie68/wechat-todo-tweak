@@ -69,6 +69,10 @@
 @end
 
 static NSString *ensureTodoSessionDiagnostic(void); // 前向声明（定义在下方）
+static NSString *aiMD5Hex(NSString *input);
+static NSArray *aiFindDatabaseFiles(void);
+static NSArray *aiSQLiteTableNames(sqlite3 *db);
+static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
 
 #pragma mark - 基础工具
 
