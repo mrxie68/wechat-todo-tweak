@@ -352,9 +352,6 @@ static void runTodoContactCleanupOnce(void) {
 static UIWindow *g_todoWindow = nil;
 static UIView *g_todoTabContainer = nil;
 static UIView *g_todoTabItemView = nil;
-static UITabBarItem *g_todoNativeItem = nil; // 原生 UITabBarItem 方式（微信怎么写就怎么写）
-static NSInteger g_originalTabCount = 0;
-static UITabBarItem *g_lastSelectedItem = nil;
 static UIViewController *g_todoOverlayVC = nil;
 static UIImageView *g_todoTabIcon = nil;
 static UILabel *g_todoTabLabel = nil;
@@ -450,9 +447,6 @@ static void relayoutTodoTabItems(void) {
     NSArray *buttons = viewsWithName(container, @"TabBarButton");
     NSArray *items = viewsWithName(container, @"TabBarItem");
     NSUInteger N = detectTabCount(container);
-    if (g_todoNativeItem && g_originalTabCount >= 3) {
-        N = g_originalTabCount; // 原生模式下按原始 tab 数均分（多出来的原生按钮交给系统排）
-    }
     if (N < 3) return;
     CGFloat slotW = cw / (N + 1.0);
 
@@ -653,20 +647,7 @@ UIColor *todoWeChatBackgroundColor(void) {
 // 保险：微信切换 tab 时也关闭待办页（覆盖手势没接住的情况）
 static void (*orig_setSelectedIndex)(id, SEL, NSInteger);
 static void swz_setSelectedIndex(id self, SEL _cmd, NSInteger index) {
-    if (g_todoNativeItem && index >= g_originalTabCount) {
-        // 我们的待办 tab：不切换控制器，只打开待办页，并把选中恢复成上一个真实 tab
-        if (g_todoTabContainer && g_lastSelectedItem) {
-            @try {
-                [(UITabBar *)g_todoTabContainer setSelectedItem:g_lastSelectedItem];
-            } @catch (NSException *e) {}
-        }
-        openTodoOverlay();
-        return;
-    }
     if (orig_setSelectedIndex) orig_setSelectedIndex(self, _cmd, index);
-    if (g_todoNativeItem && g_todoTabContainer) {
-        g_lastSelectedItem = [(UITabBar *)g_todoTabContainer selectedItem];
-    }
     closeTodoOverlay();
 }
 static void (*orig_setSelectedViewController)(id, SEL, id);
@@ -676,21 +657,7 @@ static void swz_setSelectedViewController(id self, SEL _cmd, id vc) {
 }
 static void (*orig_tabBarDidSelect)(id, SEL, id, id);
 static void swz_tabBarDidSelect(id self, SEL _cmd, id tb, id item) {
-    if (g_todoNativeItem && item == g_todoNativeItem) {
-        // 我们的待办 tab：打开待办页，恢复选中，不调用原实现（防止切到不存在的页）
-        if (g_lastSelectedItem) {
-            @try {
-                [(UITabBar *)tb setSelectedItem:g_lastSelectedItem];
-            } @catch (NSException *e) {}
-        } else {
-            NSArray *items = [(UITabBar *)tb items];
-            if (items.count > 0) [(UITabBar *)tb setSelectedItem:items[0]];
-        }
-        openTodoOverlay();
-        return;
-    }
     if (orig_tabBarDidSelect) orig_tabBarDidSelect(self, _cmd, tb, item);
-    g_lastSelectedItem = item;
     closeTodoOverlay();
 }
 
@@ -719,12 +686,9 @@ static void installTabSwitchHook(void) {
     NSLog(kAITodoLogPrefix "tab 切换 hook 已安装");
 }
 
-// 生成“待办”tab 项视图：优先用微信自己的 MMTabBarItemView 类，图标 + 文字
+// 生成“待办”tab 项视图（图标 + 文字）
 static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
-    Class itemCls = NSClassFromString(@"MMTabBarItemView");
-    UIView *item = itemCls
-        ? [[itemCls alloc] initWithFrame:CGRectMake(0, 0, width, height)]
-        : [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
+    UIView *item = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
     item.userInteractionEnabled = YES;
 
     // 新版本 tab 栏高度可能到 90pt：内容集中在上半部分，仿原生图标+文字比例
@@ -776,32 +740,6 @@ static void installTodoTabItem(void) {
             g_todoTabTarget = [[TodoTabTarget alloc] init];
         }
 
-        // —— 原生 UITabBarItem 方式：微信怎么写就怎么写，ThemeBox 也能接管 ——
-        BOOL nativeOK = NO;
-        if ([container respondsToSelector:@selector(items)] &&
-            [container respondsToSelector:@selector(setItems:animated:)]) {
-            @try {
-                NSArray *items = [(UITabBar *)container items];
-                if (items.count >= 3 && items.count <= 5) {
-                    UIImage *icon = [UIImage systemImageNamed:@"checklist"];
-                    if (!icon) icon = [UIImage systemImageNamed:@"checkmark.circle"];
-                    UITabBarItem *nativeItem =
-                        [[UITabBarItem alloc] initWithTitle:@"待办" image:icon selectedImage:icon];
-                    nativeItem.tag = 10086;
-                    NSMutableArray *arr = [items mutableCopy];
-                    [arr addObject:nativeItem];
-                    [(UITabBar *)container setItems:arr animated:NO];
-                    g_todoNativeItem = nativeItem;
-                    g_originalTabCount = items.count;
-                    nativeOK = YES;
-                    diagLog(@"已用原生 UITabBarItem 添加待办 tab（原 %lu 个）",
-                            (unsigned long)items.count);
-                }
-            } @catch (NSException *e) {
-                NSLog(kAITodoLogPrefix "原生 tab 添加异常: %@", e);
-            }
-        }
-
         CGFloat newW = container.bounds.size.width / (tabCount + 1.0);
         CGFloat itemY = 0, itemH = 55.0;
         for (UIView *s in container.subviews) {
@@ -846,8 +784,8 @@ static void installTodoTabItem(void) {
             t.cancelsTouchesInView = NO;
             [iv addGestureRecognizer:t];
         }
-        diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu 原生=%d）",
-                NSStringFromClass(cls), (unsigned long)tabCount, nativeOK);
+        diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
+                NSStringFromClass(cls), (unsigned long)tabCount);
         installTabSwitchHook();
     });
 }
