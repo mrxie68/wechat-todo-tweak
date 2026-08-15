@@ -45,6 +45,7 @@ static NSString *todoDetailDateString(double ts) {
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone
                                         target:self action:@selector(saveTapped)];
+    self.navigationItem.rightBarButtonItem.tintColor = [UIColor systemGreenColor];
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

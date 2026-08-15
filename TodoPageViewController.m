@@ -16,13 +16,17 @@ static NSString *todoDateString(double ts) {
 }
 
 @interface TodoPageViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate, UIGestureRecognizerDelegate>
-@property (nonatomic, strong) UISegmentedControl *segmentControl;
+@property (nonatomic, strong) UIView *segmentBar;
+@property (nonatomic, strong) NSArray *segmentButtons;
+@property (nonatomic, assign) NSInteger segmentIndex;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIView *inputBar;
 @property (nonatomic, strong) UITextField *inputField;
 @property (nonatomic, strong) UIButton *addButton;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, strong) UIView *statsCard;
+@property (nonatomic, strong) CAGradientLayer *heroGradient;
+@property (nonatomic, strong) UILabel *heroDateLabel;
 @property (nonatomic, strong) UILabel *todoCountLabel;
 @property (nonatomic, strong) UILabel *todoTitleLabel;
 @property (nonatomic, strong) UILabel *doneCountLabel;
@@ -44,6 +48,7 @@ static NSString *todoDateString(double ts) {
         nav.view.backgroundColor = [UIColor whiteColor];
         nav.navigationBar.translucent = NO;
         nav.navigationBar.barTintColor = [UIColor whiteColor];
+        nav.navigationBar.prefersLargeTitles = YES; // 大标题，更像原生 App
         if (@available(iOS 13.0, *)) {
             // 强制浅色外观：避免微信深色模式下顶部变黑，页面更清爽
             nav.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
@@ -52,6 +57,10 @@ static NSString *todoDateString(double ts) {
             [appearance configureWithOpaqueBackground];
             appearance.backgroundColor = [UIColor whiteColor];
             appearance.shadowColor = [UIColor clearColor];
+            appearance.largeTitleTextAttributes = @{
+                NSFontAttributeName: [UIFont boldSystemFontOfSize:30],
+                NSForegroundColorAttributeName: [UIColor blackColor],
+            };
             nav.navigationBar.standardAppearance = appearance;
             nav.navigationBar.scrollEdgeAppearance = appearance;
             nav.navigationBar.compactAppearance = appearance;
@@ -119,33 +128,73 @@ static NSString *todoDateString(double ts) {
                                         action:@selector(syncTapped)];
     self.navigationItem.rightBarButtonItems = @[settingsItem, syncItem];
 
-    // 统计卡片：未完成 / 已完成
+    // 绿色渐变头部卡片：日期 + 未完成/已完成
     self.statsCard = [[UIView alloc] initWithFrame:CGRectZero];
-    self.statsCard.backgroundColor = [UIColor whiteColor];
-    self.statsCard.layer.cornerRadius = 14;
-    self.statsCard.layer.shadowColor = [UIColor blackColor].CGColor;
-    self.statsCard.layer.shadowOpacity = 0.05;
-    self.statsCard.layer.shadowOffset = CGSizeMake(0, 2);
-    self.statsCard.layer.shadowRadius = 6;
+    self.statsCard.backgroundColor = [UIColor clearColor];
+    self.statsCard.layer.cornerRadius = 16;
+    self.statsCard.clipsToBounds = YES;
     [self.view addSubview:self.statsCard];
 
-    self.todoCountLabel = [self bigNumberLabel];
-    self.todoTitleLabel = [self smallCaptionLabel:@"未完成"];
+    self.heroGradient = [CAGradientLayer layer];
+    self.heroGradient.colors = @[
+        (id)[UIColor colorWithRed:0.23 green:0.78 blue:0.47 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:0.03 green:0.70 blue:0.38 alpha:1.0].CGColor,
+    ];
+    self.heroGradient.startPoint = CGPointMake(0, 0.5);
+    self.heroGradient.endPoint = CGPointMake(1, 0.5);
+    [self.statsCard.layer addSublayer:self.heroGradient];
+
+    self.heroDateLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    NSDateFormatter *dateFmt = [[NSDateFormatter alloc] init];
+    dateFmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+    dateFmt.dateFormat = @"M月d日 EEEE";
+    self.heroDateLabel.text = [dateFmt stringFromDate:[NSDate date]];
+    self.heroDateLabel.font = [UIFont systemFontOfSize:12];
+    self.heroDateLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+    [self.statsCard addSubview:self.heroDateLabel];
+
+    self.todoCountLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.todoCountLabel.font = [UIFont boldSystemFontOfSize:34];
+    self.todoCountLabel.textColor = [UIColor whiteColor];
+    self.todoTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.todoTitleLabel.text = @"项未完成";
+    self.todoTitleLabel.font = [UIFont systemFontOfSize:15];
+    self.todoTitleLabel.textColor = [UIColor whiteColor];
     [self.statsCard addSubview:self.todoCountLabel];
     [self.statsCard addSubview:self.todoTitleLabel];
 
-    self.doneCountLabel = [self bigNumberLabel];
-    self.doneTitleLabel = [self smallCaptionLabel:@"已完成"];
+    self.doneCountLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.doneCountLabel.font = [UIFont systemFontOfSize:14];
+    self.doneCountLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.9];
+    self.doneCountLabel.textAlignment = NSTextAlignmentRight;
+    self.doneTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     [self.statsCard addSubview:self.doneCountLabel];
     [self.statsCard addSubview:self.doneTitleLabel];
 
-    // 分段：待办 / 已完成 / 全部
-    self.segmentControl = [[UISegmentedControl alloc] initWithItems:@[@"待办", @"已完成", @"全部"]];
-    self.segmentControl.selectedSegmentIndex = 0;
-    [self.segmentControl addTarget:self
-                            action:@selector(segmentChanged)
-                  forControlEvents:UIControlEventValueChanged];
-    [self.view addSubview:self.segmentControl];
+    // 胶囊式分段：待办 / 已完成 / 全部
+    self.segmentBar = [[UIView alloc] initWithFrame:CGRectZero];
+    self.segmentBar.backgroundColor = [UIColor whiteColor];
+    self.segmentBar.layer.cornerRadius = 18;
+    self.segmentBar.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.segmentBar.layer.shadowOpacity = 0.04;
+    self.segmentBar.layer.shadowOffset = CGSizeMake(0, 2);
+    self.segmentBar.layer.shadowRadius = 6;
+    [self.view addSubview:self.segmentBar];
+
+    NSMutableArray *btns = [NSMutableArray array];
+    NSArray *titles = @[@"待办", @"已完成", @"全部"];
+    for (NSInteger i = 0; i < 3; i++) {
+        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+        b.tag = i;
+        [b setTitle:titles[i] forState:UIControlStateNormal];
+        b.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        [b addTarget:self action:@selector(segmentTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [self.segmentBar addSubview:b];
+        [btns addObject:b];
+    }
+    self.segmentButtons = btns;
+    self.segmentIndex = 0;
+    [self updateSegmentStyles];
 
     // 列表（insetGrouped：圆角卡片行，更像原生待办 App）
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
@@ -164,9 +213,14 @@ static NSString *todoDateString(double ts) {
     self.emptyLabel.hidden = YES;
     [self.view addSubview:self.emptyLabel];
 
-    // 底部输入栏
+    // 底部浮动输入栏
     self.inputBar = [[UIView alloc] initWithFrame:CGRectZero];
     self.inputBar.backgroundColor = [UIColor whiteColor];
+    self.inputBar.layer.cornerRadius = 18;
+    self.inputBar.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.inputBar.layer.shadowOpacity = 0.08;
+    self.inputBar.layer.shadowOffset = CGSizeMake(0, 2);
+    self.inputBar.layer.shadowRadius = 8;
     [self.view addSubview:self.inputBar];
 
     self.inputField = [[UITextField alloc] initWithFrame:CGRectZero];
@@ -182,9 +236,9 @@ static NSString *todoDateString(double ts) {
     [self.inputBar addSubview:self.inputField];
 
     self.addButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.addButton setTitle:@"添加" forState:UIControlStateNormal];
-    [self.addButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.addButton.titleLabel.font = [UIFont boldSystemFontOfSize:15];
+    UIImage *plus = [UIImage systemImageNamed:@"plus"];
+    [self.addButton setImage:plus forState:UIControlStateNormal];
+    self.addButton.tintColor = [UIColor whiteColor];
     self.addButton.backgroundColor = [UIColor systemGreenColor];
     self.addButton.layer.cornerRadius = 18;
     [self.addButton addTarget:self
@@ -207,23 +261,6 @@ static NSString *todoDateString(double ts) {
                                                object:nil];
 }
 
-- (UILabel *)bigNumberLabel {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectZero];
-    l.font = [UIFont boldSystemFontOfSize:26];
-    l.textColor = [UIColor labelColor];
-    l.textAlignment = NSTextAlignmentCenter;
-    return l;
-}
-
-- (UILabel *)smallCaptionLabel:(NSString *)text {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectZero];
-    l.text = text;
-    l.font = [UIFont systemFontOfSize:12];
-    l.textColor = [UIColor secondaryLabelColor];
-    l.textAlignment = NSTextAlignmentCenter;
-    return l;
-}
-
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [[NSNotificationCenter defaultCenter] postNotificationName:kWeChatTodoPageAppearNotification object:nil];
@@ -241,30 +278,31 @@ static NSString *todoDateString(double ts) {
     UIEdgeInsets sa = self.view.safeAreaInsets;
 
     CGFloat cardW = b.size.width - 32;
-    CGFloat cardH = 64;
+    CGFloat cardH = 96;
     CGFloat cardTop = sa.top + 12;
     self.statsCard.frame = CGRectMake(16, cardTop, cardW, cardH);
-    CGFloat half = cardW / 2.0;
-    self.todoCountLabel.frame = CGRectMake(0, 12, half, 30);
-    self.todoTitleLabel.frame = CGRectMake(0, 44, half, 16);
-    self.doneCountLabel.frame = CGRectMake(half, 12, half, 30);
-    self.doneTitleLabel.frame = CGRectMake(half, 44, half, 16);
+    self.heroGradient.frame = self.statsCard.bounds;
+    self.heroDateLabel.frame = CGRectMake(18, 12, cardW - 36, 18);
+    self.todoCountLabel.frame = CGRectMake(18, 38, 76, 44);
+    self.todoTitleLabel.frame = CGRectMake(96, 52, 90, 24);
+    self.doneCountLabel.frame = CGRectMake(cardW - 150, 60, 132, 20);
+    self.doneTitleLabel.frame = CGRectZero;
 
     CGFloat segTop = cardTop + cardH + 12;
-    self.segmentControl.frame = CGRectMake(16, segTop, cardW, 32);
+    self.segmentBar.frame = CGRectMake(16, segTop, cardW, 36);
+    [self updateSegmentStyles];
 
-    CGFloat tableTop = segTop + 32 + 12;
+    CGFloat tableTop = segTop + 36 + 12;
 
     CGFloat barContentH = 54;
-    CGFloat barH = barContentH + (self.keyboardInset > 0 ? 0 : sa.bottom);
-    CGFloat barBottom = b.size.height - self.keyboardInset;
-    self.inputBar.frame = CGRectMake(0, barBottom - barH, b.size.width, barH);
+    CGFloat barBottom = b.size.height - self.keyboardInset - (self.keyboardInset > 0 ? 10 : sa.bottom + 8);
+    self.inputBar.frame = CGRectMake(16, barBottom - barContentH, b.size.width - 32, barContentH);
 
     CGFloat fieldH = 36;
-    CGFloat btnW = 64;
     CGFloat fieldY = (barContentH - fieldH) / 2.0;
-    self.inputField.frame = CGRectMake(16, fieldY, b.size.width - 32 - btnW - 10, fieldH);
-    self.addButton.frame = CGRectMake(b.size.width - 16 - btnW, fieldY, btnW, fieldH);
+    self.inputField.frame = CGRectMake(10, fieldY, self.inputBar.bounds.size.width - 20 - 44 - 8, fieldH);
+    self.addButton.frame = CGRectMake(self.inputBar.bounds.size.width - 10 - 36, fieldY, 36, 36);
+    self.addButton.layer.cornerRadius = 18;
 
     self.tableView.frame = CGRectMake(0, tableTop, b.size.width, barBottom - tableTop);
     self.emptyLabel.frame = CGRectMake(32, tableTop + 60, b.size.width - 64, 90);
@@ -275,7 +313,7 @@ static NSString *todoDateString(double ts) {
 - (void)reloadItems {
     NSArray *all = [AITodoManager allTodos];
     NSMutableArray *filtered = [NSMutableArray array];
-    NSInteger seg = self.segmentControl.selectedSegmentIndex;
+    NSInteger seg = self.segmentIndex;
     for (NSDictionary *t in all) {
         BOOL done = [t[@"done"] boolValue];
         if (seg == 0 && done) continue;
@@ -316,17 +354,20 @@ static NSString *todoDateString(double ts) {
         else undone++;
     }
     self.todoCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)undone];
-    self.doneCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)completed];
-    self.todoCountLabel.textColor = undone > 0 ? [UIColor systemGreenColor] : [UIColor systemGray3Color];
-    self.doneCountLabel.textColor = completed > 0 ? [UIColor secondaryLabelColor] : [UIColor systemGray3Color];
+    self.doneCountLabel.text = [NSString stringWithFormat:@"已完成 %lu 项", (unsigned long)completed];
+    // 渐变头部卡里统一白色
+    self.todoCountLabel.textColor = [UIColor whiteColor];
+    self.doneCountLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.9];
 
     BOOL empty = (filtered.count == 0);
     self.tableView.hidden = empty;
     self.emptyLabel.hidden = !empty;
     if (seg == 1) {
-        self.emptyLabel.text = @"还没有已完成的待办\n完成一条后会自动出现在这里";
+        [self setEmptyMessage:@"还没有已完成的待办\n完成一条后会自动出现在这里" icon:@"🎉"];
+    } else if (seg == 2) {
+        [self setEmptyMessage:@"还没有任何待办\n在下方输入第一条吧" icon:@"📋"];
     } else {
-        self.emptyLabel.text = @"暂无待办 📋\n在下方输入一条吧";
+        [self setEmptyMessage:@"太棒了，全部完成！\n在下方输入新的待办吧" icon:@"✅"];
     }
 
     // 已完成分组底部放“清空已完成”
@@ -345,20 +386,57 @@ static NSString *todoDateString(double ts) {
                             : @"待办事项";
 }
 
-- (void)segmentChanged {
+- (void)setEmptyMessage:(NSString *)message icon:(NSString *)icon {
+    NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
+    if (icon.length > 0) {
+        [as appendAttributedString:
+            [[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@\n", icon]
+                                            attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:44]}]];
+    }
+    [as appendAttributedString:
+        [[NSAttributedString alloc] initWithString:message
+                                        attributes:@{
+                                            NSFontAttributeName: [UIFont systemFontOfSize:14],
+                                            NSForegroundColorAttributeName: [UIColor secondaryLabelColor],
+                                        }]];
+    self.emptyLabel.attributedText = as;
+}
+
+- (void)segmentTapped:(UIButton *)sender {
+    self.segmentIndex = sender.tag;
+    [self updateSegmentStyles];
     [self reloadItems];
 }
 
+- (void)updateSegmentStyles {
+    CGFloat w = self.segmentBar.bounds.size.width;
+    CGFloat h = self.segmentBar.bounds.size.height;
+    if (w <= 0 || h <= 0) return;
+    for (UIButton *b in self.segmentButtons) {
+        CGFloat x = b.tag * (w / 3.0);
+        b.frame = CGRectMake(x + 3, 3, w / 3.0 - 6, h - 6);
+        BOOL sel = (b.tag == self.segmentIndex);
+        b.backgroundColor = sel ? [UIColor systemGreenColor] : [UIColor clearColor];
+        [b setTitleColor:sel ? [UIColor whiteColor]
+                            : [UIColor colorWithRed:0.35 green:0.35 blue:0.38 alpha:1.0]
+                forState:UIControlStateNormal];
+        b.layer.cornerRadius = (h - 6) / 2.0;
+        b.clipsToBounds = YES;
+    }
+}
+
 - (void)swipeLeft {
-    if (self.segmentControl.selectedSegmentIndex < 2) {
-        self.segmentControl.selectedSegmentIndex++;
+    if (self.segmentIndex < 2) {
+        self.segmentIndex++;
+        [self updateSegmentStyles];
         [self reloadItems];
     }
 }
 
 - (void)swipeRight {
-    if (self.segmentControl.selectedSegmentIndex > 0) {
-        self.segmentControl.selectedSegmentIndex--;
+    if (self.segmentIndex > 0) {
+        self.segmentIndex--;
+        [self updateSegmentStyles];
         [self reloadItems];
     }
 }
@@ -453,7 +531,8 @@ static NSString *todoDateString(double ts) {
     NSString *text = [self.inputField.text stringByTrimmingCharactersInSet:
                       [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (text.length == 0) return;
-    self.segmentControl.selectedSegmentIndex = 0;
+    self.segmentIndex = 0;
+    [self updateSegmentStyles];
     [AITodoManager addTodo:text];
     self.inputField.text = @"";
     [self reloadItems];
