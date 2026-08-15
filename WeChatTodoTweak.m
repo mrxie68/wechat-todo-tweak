@@ -55,6 +55,7 @@
 - (void)saveContact:(id)contact;
 - (void)insertContact:(id)contact;
 - (id)getContactByName:(NSString *)userName;
+- (void)setContact:(id)contact nickName:(NSString *)nickName;
 @end
 
 @interface CContact : NSObject
@@ -295,6 +296,9 @@ static NSString *createTodoSessionOnMain(void) {
                             [existing setM_nsNickName:kAITodoNickName];
                         } else {
                             [existing setValue:kAITodoNickName forKey:@"m_nsNickName"];
+                        }
+                        if ([contactMgr respondsToSelector:@selector(setContact:nickName:)]) {
+                            [contactMgr setContact:existing nickName:kAITodoNickName];
                         }
                         if ([existing respondsToSelector:@selector(setM_nsRemark:)]) {
                             [existing setM_nsRemark:kAITodoNickName];
@@ -978,27 +982,39 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         [lines addObject:[frames componentsJoinedByString:@"、"]];
     }
 
-    // 3.5 头像存储路径探测（替换头像需要知道文件位置和命名）
-    NSString *docDir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
-    NSDirectoryEnumerator *en = [[NSFileManager defaultManager] enumeratorAtPath:docDir];
+    // 3.5 头像存储路径探测（Documents + Library/Caches 里的图片文件）
     NSMutableArray *avatarPaths = [NSMutableArray array];
-    int scanned = 0;
-    for (NSString *rel in en) {
-        if (++scanned > 50000) break;
-        NSString *lower = rel.lowercaseString;
-        if ([lower rangeOfString:@"avatar"].location != NSNotFound ||
-            [lower rangeOfString:@"headimg"].location != NSNotFound ||
-            [lower rangeOfString:@"head_img"].location != NSNotFound) {
-            if (avatarPaths.count < 10) [avatarPaths addObject:rel];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *scanRoots = @[
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"],
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"],
+    ];
+    for (NSString *root in scanRoots) {
+        if (![fm fileExistsAtPath:root]) continue;
+        NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+        int scanned = 0;
+        for (NSString *rel in en) {
+            if (++scanned > 60000) break;
+            NSString *lower = rel.lowercaseString;
+            if ([lower rangeOfString:@"avatar"].location != NSNotFound ||
+                [lower rangeOfString:@"headimg"].location != NSNotFound ||
+                [lower rangeOfString:@"head_img"].location != NSNotFound ||
+                [lower hasSuffix:@".jpg"] || [lower hasSuffix:@".jpeg"] ||
+                [lower hasSuffix:@".png"] || [lower hasSuffix:@".gif"]) {
+                if (avatarPaths.count < 15) {
+                    [avatarPaths addObject:[rel stringByAppendingFormat:@"(%@)",
+                                          [root lastPathComponent]]];
+                }
+            }
         }
     }
     if (avatarPaths.count > 0) {
-        [lines addObject:@"== 头像路径（前10个）=="];
+        [lines addObject:@"== 头像/图片路径（前15个）=="];
         for (NSString *p in avatarPaths) {
             [lines addObject:[@"  " stringByAppendingString:p]];
         }
     } else {
-        [lines addObject:@"== 头像路径：未找到 =="];
+        [lines addObject:@"== 头像/图片路径：未找到 =="];
     }
 
     // 4. 聊天界面类（名字含 Chat + ViewController，打开过聊天后应该已加载）
