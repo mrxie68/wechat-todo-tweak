@@ -285,6 +285,43 @@ static NSString *createTodoSessionOnMain(void) {
                     knownNow = known2 != nil;
                 }
             }
+            // 微信自动建的联系人昵称=用户名，直接改它再保存（这才是列表显示用的对象）
+            if ([contactMgr respondsToSelector:@selector(getContactByName:)]) {
+                id existing = [contactMgr getContactByName:kAITodoChatId];
+                if (existing) {
+                    @try {
+                        if ([existing respondsToSelector:@selector(setM_nsNickName:)]) {
+                            [existing setM_nsNickName:kAITodoNickName];
+                        } else {
+                            [existing setValue:kAITodoNickName forKey:@"m_nsNickName"];
+                        }
+                        if ([existing respondsToSelector:@selector(setM_nsRemark:)]) {
+                            [existing setM_nsRemark:kAITodoNickName];
+                        } else {
+                            [existing setValue:kAITodoNickName forKey:@"m_nsRemark"];
+                        }
+                        NSArray *updateSels = @[@"updateContact:", @"modifyContact:", @"saveContact:",
+                                                @"addOrUpdateContact:", @"updateContact:", @"modifyContact:"];
+                        for (NSString *selName in updateSels) {
+                            SEL sel = NSSelectorFromString(selName);
+                            if ([contactMgr respondsToSelector:sel]) {
+                                [contactMgr performSelector:sel withObject:existing];
+                            }
+                        }
+                        id after = [contactMgr getContactByName:kAITodoChatId];
+                        NSString *nickAfter = @"";
+                        NSString *remarkAfter = @"";
+                        @try { nickAfter = [after valueForKey:@"m_nsNickName"] ?: @""; } @catch (NSException *e) {}
+                        @try { remarkAfter = [after valueForKey:@"m_nsRemark"] ?: @""; } @catch (NSException *e) {}
+                        contactNote = [contactNote stringByAppendingFormat:
+                                       @"；改后昵称:%@ 备注:%@",
+                                       nickAfter.length ? nickAfter : @"空",
+                                       remarkAfter.length ? remarkAfter : @"空"];
+                    } @catch (NSException *e) {
+                        contactNote = [contactNote stringByAppendingFormat:@"；改备注异常:%@", e];
+                    }
+                }
+            }
             contactNote = [contactNote stringByAppendingFormat:@"（回读%@）",
                            knownNow ? @"已知" : @"未知"];
         }
@@ -870,6 +907,25 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
             if (pname) [lines addObject:[NSString stringWithFormat:@"  prop: %s", pname]];
         }
         free(props);
+    }
+
+    // 2.6 CContactMgr 方法探测（找更新联系人接口）
+    Class cmCls = NSClassFromString(@"CContactMgr");
+    if (cmCls) {
+        [lines addObject:@"== CContactMgr 方法（contact/update/modify/save/add/insert）=="];
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(cmCls, &count);
+        int shown = 0;
+        for (unsigned int i = 0; i < count && shown < 30; i++) {
+            NSString *sel = NSStringFromSelector(method_getName(methods[i]));
+            if ([sel rangeOfString:@"contact" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [sel hasPrefix:@"update"] || [sel hasPrefix:@"modify"] || [sel hasPrefix:@"save"] ||
+                [sel hasPrefix:@"add"] || [sel hasPrefix:@"insert"]) {
+                [lines addObject:[@"  " stringByAppendingString:sel]];
+                shown++;
+            }
+        }
+        free(methods);
     }
 
     // 3. 主界面类（只报关键候选）
