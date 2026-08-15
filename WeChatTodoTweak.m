@@ -607,11 +607,72 @@ void todoCloseOverlay(void) {
 // 供待办页使用微信页面背景，让页面和微信融为一体
 UIColor *todoWeChatBackgroundColor(void) {
     UIViewController *mf = findNewMainFrameVC();
-    UIColor *c = mf.view.backgroundColor;
+    UIColor *c = nil;
+    // 优先取主界面表格背景（微信页面通常用它做底色）
+    if (mf.view) {
+        NSMutableArray *queue = [NSMutableArray arrayWithObject:mf.view];
+        int scanned = 0;
+        while (queue.count > 0 && scanned < 5000) {
+            UIView *v = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            scanned++;
+            if ([v isKindOfClass:[UITableView class]]) {
+                UIColor *tc = v.backgroundColor;
+                if (tc && CGColorGetAlpha(tc.CGColor) > 0.01) {
+                    c = tc;
+                    break;
+                }
+            }
+            [queue addObjectsFromArray:v.subviews];
+        }
+    }
+    if (!c) c = mf.view.backgroundColor;
     if (!c || CGColorGetAlpha(c.CGColor) < 0.01) {
         return [UIColor systemGroupedBackgroundColor];
     }
     return c;
+}
+
+// 保险：微信切换 tab 时也关闭待办页（覆盖手势没接住的情况）
+static void (*orig_setSelectedIndex)(id, SEL, NSInteger);
+static void swz_setSelectedIndex(id self, SEL _cmd, NSInteger index) {
+    if (orig_setSelectedIndex) orig_setSelectedIndex(self, _cmd, index);
+    closeTodoOverlay();
+}
+static void (*orig_setSelectedViewController)(id, SEL, id);
+static void swz_setSelectedViewController(id self, SEL _cmd, id vc) {
+    if (orig_setSelectedViewController) orig_setSelectedViewController(self, _cmd, vc);
+    closeTodoOverlay();
+}
+static void (*orig_tabBarDidSelect)(id, SEL, id, id);
+static void swz_tabBarDidSelect(id self, SEL _cmd, id tb, id item) {
+    if (orig_tabBarDidSelect) orig_tabBarDidSelect(self, _cmd, tb, item);
+    closeTodoOverlay();
+}
+
+static void installTabSwitchHook(void) {
+    Class cls = NSClassFromString(@"MainTabBarViewController");
+    if (!cls) return;
+    static BOOL hooked = NO;
+    if (hooked) return;
+
+    Method m1 = class_getInstanceMethod(cls, @selector(setSelectedIndex:));
+    if (m1) {
+        orig_setSelectedIndex = (void *)method_getImplementation(m1);
+        method_setImplementation(m1, (IMP)swz_setSelectedIndex);
+    }
+    Method m2 = class_getInstanceMethod(cls, @selector(setSelectedViewController:));
+    if (m2) {
+        orig_setSelectedViewController = (void *)method_getImplementation(m2);
+        method_setImplementation(m2, (IMP)swz_setSelectedViewController);
+    }
+    Method m3 = class_getInstanceMethod(cls, @selector(tabBar:didSelectItem:));
+    if (m3) {
+        orig_tabBarDidSelect = (void *)method_getImplementation(m3);
+        method_setImplementation(m3, (IMP)swz_tabBarDidSelect);
+    }
+    hooked = YES;
+    NSLog(kAITodoLogPrefix "tab 切换 hook 已安装");
 }
 
 // 生成“待办”tab 项视图（仿 MMTabBarItemView：图标 + 文字）
@@ -694,7 +755,15 @@ static void installTodoTabItem(void) {
                 g_tabSwizzled = YES;
             }
         }
-        // 其它 4 个 tab 点击时关闭待办页（底部菜单保持可见）
+        // 其它 4 个 tab 点击时关闭待办页（按钮和 item 都挂，确保生效）
+        NSArray *otherButtons = viewsWithName(container, @"TabBarButton");
+        for (UIView *iv in otherButtons) {
+            UITapGestureRecognizer *t =
+                [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
+                                                        action:@selector(otherTabTapped)];
+            t.cancelsTouchesInView = NO;
+            [iv addGestureRecognizer:t];
+        }
         NSArray *otherItems = viewsWithName(container, @"TabBarItem");
         for (UIView *iv in otherItems) {
             UITapGestureRecognizer *t =
@@ -705,6 +774,7 @@ static void installTodoTabItem(void) {
         }
         diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
                 NSStringFromClass(cls), (unsigned long)tabCount);
+        installTabSwitchHook();
     });
 }
 
