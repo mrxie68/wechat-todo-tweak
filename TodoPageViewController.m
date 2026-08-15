@@ -495,6 +495,8 @@ static NSString *todoDateString(double ts) {
         CGRect kbInView = [self.view convertRect:kbEnd fromView:nil];
         CGRect inter = CGRectIntersection(self.view.bounds, kbInView);
         inset = MAX(0, inter.size.height);
+        // 保险：合法键盘不会盖住屏幕 75% 以上，异常全屏 frame 直接忽略，防止输入栏飞顶
+        if (inset > self.view.bounds.size.height * 0.75) inset = 0;
     }
     self.keyboardInset = inset;
     // 必须先 setNeedsLayout 再 layoutIfNeeded，否则布局不会重跑，输入栏会被键盘挡住
@@ -505,21 +507,10 @@ static NSString *todoDateString(double ts) {
 }
 
 - (void)textFieldDidBeginEditing:(UITextField *)textField {
-    // 兜底：万一键盘通知没生效，扫描键盘窗口把输入栏顶起来
+    // 兜底：通知已经算好高度的话，确保布局刷新（不扫窗口，键盘窗口 frame 是整个屏幕，扫了会算错）
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        CGFloat inset = 0;
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            NSString *cls = NSStringFromClass([w class]);
-            if ([cls rangeOfString:@"RemoteKeyboard"].location == NSNotFound &&
-                [cls rangeOfString:@"TextEffects"].location == NSNotFound &&
-                [cls rangeOfString:@"Keyboard"].location == NSNotFound) continue;
-            CGRect inView = [self.view convertRect:w.frame fromView:nil];
-            CGRect inter = CGRectIntersection(self.view.bounds, inView);
-            inset = MAX(inset, inter.size.height);
-        }
-        if (inset > self.keyboardInset) {
-            self.keyboardInset = inset;
+        if (self.keyboardInset > 0) {
             [self.view setNeedsLayout];
             [UIView animateWithDuration:0.2 animations:^{
                 [self.view layoutIfNeeded];
