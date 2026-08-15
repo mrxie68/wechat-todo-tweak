@@ -7,6 +7,7 @@
 
 extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 extern void todoCloseOverlay(void);  // 由 WeChatTodoTweak.m 提供
+extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 
 #pragma mark - 日历日期 Cell
 
@@ -127,7 +128,8 @@ extern void todoCloseOverlay(void);  // 由 WeChatTodoTweak.m 提供
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    // 用微信页面背景，和微信融为一体
+    self.view.backgroundColor = todoWeChatBackgroundColor();
     todoEnsureAccount(); // 重进微信后立即拿到当前账号，保证待办目录正确
     // 每次进入都停留在当天
     self.selectedDay = [NSDate date];
@@ -598,12 +600,27 @@ extern void todoCloseOverlay(void);  // 由 WeChatTodoTweak.m 提供
 }
 
 - (void)editSubTask:(SubTaskItem *)sub inTodo:(MainTodoItem *)todo {
-    [self presentMultilineInputWithTitle:@"编辑子任务"
-                             initialText:sub.title
-                              completion:^(NSString *text) {
-        [AITodoManager renameSubTask:sub.identifier inTodo:todo.identifier title:text];
-        [self reloadRowForTodo:todo];
-    }];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:nil
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"编辑"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        [self presentMultilineInputWithTitle:@"编辑子任务"
+                                 initialText:sub.title
+                                  completion:^(NSString *text) {
+            [AITodoManager renameSubTask:sub.identifier inTodo:todo.identifier title:text];
+            [self reloadRowForTodo:todo];
+        }];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"删除"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *action) {
+        [AITodoManager removeSubTask:sub.identifier inTodo:todo.identifier];
+        [self reloadList];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 // 打开 Markdown 编辑页（新建/编辑待办与子任务共用）
@@ -775,7 +792,7 @@ extern void todoCloseOverlay(void);  // 由 WeChatTodoTweak.m 提供
     self.statsButton.frame = CGRectMake(cardX + cardW / 2.0, rowY, cardW / 2.0, 28);
 
     CGFloat headerY = rowY + 28 + 12;
-    self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 130, 24);
+    self.listHeaderLabel.frame = CGRectMake(16, headerY, w - 130, 24); // 与上面按钮左对齐
     self.todayButton.frame = CGRectMake(w - 110, headerY, 90, 24);
 
     CGFloat tableY = headerY + 24 + 4;

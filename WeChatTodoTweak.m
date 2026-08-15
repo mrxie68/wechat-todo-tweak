@@ -604,6 +604,16 @@ void todoCloseOverlay(void) {
     });
 }
 
+// 供待办页使用微信页面背景，让页面和微信融为一体
+UIColor *todoWeChatBackgroundColor(void) {
+    UIViewController *mf = findNewMainFrameVC();
+    UIColor *c = mf.view.backgroundColor;
+    if (!c || CGColorGetAlpha(c.CGColor) < 0.01) {
+        return [UIColor systemGroupedBackgroundColor];
+    }
+    return c;
+}
+
 // 生成“待办”tab 项视图（仿 MMTabBarItemView：图标 + 文字）
 static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     UIView *item = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];

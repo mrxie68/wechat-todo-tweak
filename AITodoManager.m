@@ -202,6 +202,20 @@ static NSString * const kAITodoModelListKey = @"WeChatTodoModels_";
     return NO;
 }
 
++ (BOOL)removeSubTask:(NSString *)subId inTodo:(NSInteger)todoId {
+    NSMutableArray *list = [self loadTodos];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    for (SubTaskItem *s in m.subTasks) {
+        if ([s.identifier isEqualToString:subId]) {
+            [m.subTasks removeObject:s];
+            [self saveTodos:list];
+            return YES;
+        }
+    }
+    return NO;
+}
+
 + (BOOL)setTodo:(NSInteger)todoId selected:(BOOL)selected {
     NSMutableArray *list = [self loadTodos];
     MainTodoItem *m = [self todoWithId:todoId inList:list];

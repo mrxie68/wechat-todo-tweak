@@ -15,6 +15,7 @@
 + (BOOL)addSubTask:(NSString *)subTitle toTodo:(NSInteger)todoId;
 + (BOOL)toggleSubTask:(NSString *)subId inTodo:(NSInteger)todoId;
 + (BOOL)renameSubTask:(NSString *)subId inTodo:(NSInteger)todoId title:(NSString *)title;
++ (BOOL)removeSubTask:(NSString *)subId inTodo:(NSInteger)todoId;
 + (BOOL)setTodo:(NSInteger)todoId selected:(BOOL)selected;
 + (BOOL)toggleBookmarkForTodo:(NSInteger)todoId;
 + (NSUInteger)clearDone;
