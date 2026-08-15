@@ -95,6 +95,16 @@ static NSArray *aiSQLiteTableNames(sqlite3 *db);
 static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
 static UIViewController *tweakTopViewController(void); // 前向声明（定义在下方）
 
+// 从列名列表里按候选名匹配一列（支持多种命名变体）
+static NSString *aiPickColumnName(NSArray *cols, NSArray *candidates) {
+    for (NSString *c in candidates) {
+        for (NSString *col in cols) {
+            if ([col isEqualToString:c]) return col;
+        }
+    }
+    return nil;
+}
+
 @interface WeChatTodoHandler : NSObject
 + (void)handleIncomingMessage:(CMessageWrap *)wrap;
 + (void)noteReplySent:(NSString *)text chatId:(NSString *)chatId;
@@ -554,16 +564,13 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 }
 
 + (NSString *)createTodoSessionDiagnostic {
-    // 优先走微信原生接口（内存创建，列表自动刷新）
+    // 先走微信原生接口（内存创建 + 欢迎消息），结果只作备注，不提前返回
     NSString *managerResult = createTodoSessionViaManager();
-    if ([managerResult hasPrefix:@"✅"]) {
-        return [managerResult stringByAppendingString:
-                @"\n（优先使用微信原生接口，不再写数据库）"];
-    }
-    // 原生接口失败才退回数据库兜底
+    NSMutableArray *notes = [NSMutableArray arrayWithObject:managerResult];
+
+    // 联系人数据库写入（让下次启动时微信能显示中文名）
     NSString *selfUsr = wechatSelfUsrName();
     NSString *md5 = selfUsr.length > 0 ? aiMD5Hex(selfUsr) : @"";
-    NSMutableArray *notes = [NSMutableArray array];
 
     // 第一步：写联系人（会话要显示名字，必须有联系人记录）
     NSArray *dbs = aiFindDatabaseFiles();
@@ -582,12 +589,15 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         for (NSString *tbl in tables) {
             if ([tbl.lowercaseString rangeOfString:@"contact"].location == NSNotFound) continue;
             NSArray *cols = aiSQLiteColumns(db, tbl);
-            if (![cols containsObject:@"UserName"] || ![cols containsObject:@"NickName"]) continue;
+            NSString *userCol = aiPickColumnName(cols, @[@"UserName", @"userName", @"m_nsUserName",
+                                                         @"usrName", @"m_nsUsrName", @"ContactName"]);
+            NSString *nickCol = aiPickColumnName(cols, @[@"NickName", @"nickName", @"m_nsNickName"]);
+            if (!userCol || !nickCol) continue;
             // 已存在？
             sqlite3_stmt *stmt = NULL;
             int count = 0;
             NSString *existsSql = [NSString stringWithFormat:
-                                   @"SELECT COUNT(*) FROM \"%@\" WHERE \"UserName\" = ?", tbl];
+                                   @"SELECT COUNT(*) FROM \"%@\" WHERE \"%@\" = ?", tbl, userCol];
             if (sqlite3_prepare_v2(db, [existsSql UTF8String], -1, &stmt, NULL) == SQLITE_OK) {
                 sqlite3_bind_text(stmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
                 if (sqlite3_step(stmt) == SQLITE_ROW) count = sqlite3_column_int(stmt, 0);
@@ -600,7 +610,8 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
                 break;
             }
             NSString *insertSql = [NSString stringWithFormat:
-                                   @"INSERT INTO \"%@\" (\"UserName\", \"NickName\") VALUES (?, ?)", tbl];
+                                   @"INSERT INTO \"%@\" (\"%@\", \"%@\") VALUES (?, ?)",
+                                   tbl, userCol, nickCol];
             sqlite3_stmt *istmt = NULL;
             int rc = sqlite3_prepare_v2(db, [insertSql UTF8String], -1, &istmt, NULL);
             if (rc == SQLITE_OK) {
@@ -611,7 +622,8 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
             sqlite3_finalize(istmt);
             sqlite3_close(db);
             if (rc == SQLITE_DONE) {
-                [notes addObject:[NSString stringWithFormat:@"已写联系人（%@）", tbl]];
+                [notes addObject:[NSString stringWithFormat:@"已写联系人（%@，列 %@/%@）",
+                                  tbl, userCol, nickCol]];
                 contactWritten = YES;
             } else {
                 [notes addObject:[NSString stringWithFormat:@"联系人写入失败（%@ rc=%d）", tbl, rc]];
@@ -623,7 +635,8 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     if (!contactWritten) {
         [notes addObject:@"未找到可写的联系人表（需 UserName+NickName 列）"];
     }
-    [notes insertObject:[@"接口尝试：" stringByAppendingString:managerResult] atIndex:0];
+    [notes insertObject:@"——— 接口路径 ———" atIndex:0];
+    [notes insertObject:@"——— 联系人路径 ———" atIndex:notes.count];
 
     // 第二步：写会话行
     for (NSDictionary *d in dbs) {
