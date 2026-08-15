@@ -54,6 +54,7 @@
 
 @interface CContact : NSObject
 @property (nonatomic, retain) NSString *m_nsUsrName;
+@property (nonatomic, retain) NSString *m_nsNickName;
 @end
 
 @interface SettingUtil : NSObject
@@ -105,19 +106,29 @@ static NSString *createTodoSessionViaManager(void) {
     free(plist);
     @try {
         BOOL setUser = NO;
-        for (NSString *k in @[@"m_userName", @"userName", @"m_nsUsrName", @"sessionId"]) {
+        for (NSString *k in @[@"m_nsUserName", @"m_userName", @"userName", @"m_nsUsrName", @"sessionId"]) {
             if ([props containsObject:k]) {
                 [session setValue:kAITodoChatId forKey:k];
                 setUser = YES;
                 break;
             }
         }
-        BOOL setNick = NO;
-        for (NSString *k in @[@"m_nsNickName", @"nickName", @"NickName"]) {
-            if ([props containsObject:k]) {
-                [session setValue:kAITodoNickName forKey:k];
-                setNick = YES;
-                break;
+        // 昵称在 m_contact（联系人对象）上
+        BOOL setContact = NO;
+        if ([props containsObject:@"m_contact"]) {
+            Class contactCls = NSClassFromString(@"CContact");
+            if (contactCls) {
+                id contact = [[contactCls alloc] init];
+                if (contact) {
+                    if ([contact respondsToSelector:@selector(setM_nsUsrName:)]) {
+                        [contact setM_nsUsrName:kAITodoChatId];
+                    }
+                    if ([contact respondsToSelector:@selector(setM_nsNickName:)]) {
+                        [contact setM_nsNickName:kAITodoNickName];
+                    }
+                    [session setValue:contact forKey:@"m_contact"];
+                    setContact = YES;
+                }
             }
         }
         if (!setUser) {
@@ -125,8 +136,8 @@ static NSString *createTodoSessionViaManager(void) {
                     [props componentsJoinedByString:@","]];
         }
         [mgr AddOrModifySession:session withNotifyFlag:YES immediateRefresh:YES];
-        return [NSString stringWithFormat:@"✅ 已通过微信接口创建待办联系人（userName%@ / nick%@）",
-                setUser ? @"✓" : @"✗", setNick ? @"✓" : @"✗"];
+        return [NSString stringWithFormat:@"✅ 已通过微信接口创建待办联系人（userName✓ / 联系人%@）",
+                setContact ? @"✓" : @"✗"];
     } @catch (NSException *e) {
         return [NSString stringWithFormat:@"⚠️ 创建异常：%@", e];
     }
