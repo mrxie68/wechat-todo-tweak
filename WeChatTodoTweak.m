@@ -426,6 +426,7 @@ static NSArray *aiFindDatabaseFiles(void) {
 // 待办联系人的展示后续改用 UI 插行方案，不走数据库写入。
 static NSString *ensureTodoSessionDiagnostic(void) {
     NSMutableArray *candidateTables = [NSMutableArray array];
+    NSInteger sessionCount = 0, chatCount = 0;
     NSArray *dbs = aiFindDatabaseFiles();
     for (NSDictionary *d in dbs) {
         sqlite3 *db = NULL;
@@ -441,16 +442,25 @@ static NSString *ensureTodoSessionDiagnostic(void) {
             BOOL isSessionLike = [lower rangeOfString:@"session"].location != NSNotFound;
             BOOL isChatLike = [lower rangeOfString:@"chat"].location != NSNotFound;
             if (isSessionLike || isChatLike) {
-                [candidateTables addObject:[NSString stringWithFormat:@"%@(%@)", tbl,
-                                            [d[@"path"] lastPathComponent]]];
+                if (isSessionLike) sessionCount++; else chatCount++;
+                if (candidateTables.count < 15) {
+                    [candidateTables addObject:[NSString stringWithFormat:@"%@(%@)", tbl,
+                                                [d[@"path"] lastPathComponent]]];
+                }
                 continue;
             }
         }
         sqlite3_close(db);
     }
     if (candidateTables.count > 0) {
-        return [NSString stringWithFormat:@"只读探测：找到候选表 %@；写入已禁用（防闪退），待办联系人将改用 UI 插行方案。",
-                [candidateTables componentsJoinedByString:@"、"]];
+        NSInteger total = sessionCount + chatCount;
+        NSString *list = [candidateTables componentsJoinedByString:@"、"];
+        if (total > 15) {
+            list = [list stringByAppendingFormat:@"…等共 %ld 张", (long)total];
+        }
+        return [NSString stringWithFormat:
+                @"只读探测完成：会话类表 %ld 张 / 聊天类表 %ld 张\n示例：%@\n写入已禁用（防闪退），待办联系人将改用 UI 插行方案。",
+                (long)sessionCount, (long)chatCount, list];
     }
     return @"只读探测：未找到 session/chat 相关表；写入已禁用（防闪退）。";
 }

@@ -19,6 +19,24 @@
 
 @implementation TodoSettingsViewController
 
+// 诊断结果：完整内容复制剪贴板，弹窗只显示摘要；2 分钟后自动清空剪贴板（用完即销毁）
+- (NSString *)consumeDiagnostic:(NSString *)full {
+    [[UIPasteboard generalPasteboard] setString:full];
+    NSString *copied = [full copy];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        // 只有剪贴板还是这份内容时才清空，避免误删用户之后复制的东西
+        if ([[[UIPasteboard generalPasteboard] string] isEqualToString:copied]) {
+            [[UIPasteboard generalPasteboard] setString:@""];
+        }
+    });
+    if (full.length > 180) {
+        return [[full substringToIndex:180] stringByAppendingString:
+                @"\n…（完整已复制到剪贴板，2 分钟后自动清除）"];
+    }
+    return full;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"待办事项设置";
@@ -153,7 +171,7 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.sessionStatusLabel.text = diag;
+            self.sessionStatusLabel.text = [self consumeDiagnostic:diag];
         });
     });
 }
@@ -220,10 +238,11 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.sessionStatusLabel.text = diag;
+            NSString *shortText = [self consumeDiagnostic:diag];
+            self.sessionStatusLabel.text = shortText;
             [progress dismissViewControllerAnimated:NO completion:^{
                 UIAlertController *r = [UIAlertController alertControllerWithTitle:@"待办联系人"
-                                                                           message:diag
+                                                                           message:shortText
                                                                     preferredStyle:UIAlertControllerStyleAlert];
                 [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:r animated:YES completion:nil];
