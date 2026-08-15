@@ -21,7 +21,7 @@ static void todoAlert(NSString *msg); // 前向声明
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"待办事项设置";
-    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    self.view.backgroundColor = [UIColor colorWithRed:0.945 green:0.945 blue:0.957 alpha:1.0];
     // 内容从导航栏下方开始，避免和标题栏重叠
     self.edgesForExtendedLayout = UIRectEdgeNone;
 

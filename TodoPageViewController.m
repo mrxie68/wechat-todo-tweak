@@ -38,6 +38,10 @@ static NSString *todoDateString(double ts) {
         TodoPageViewController *vc = [[TodoPageViewController alloc] init];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        // 兜底白底：即使微信/其它插件把导航栏弄透明，露出来的也是白色而不是黑色
+        nav.view.backgroundColor = [UIColor whiteColor];
+        nav.navigationBar.translucent = NO;
+        nav.navigationBar.barTintColor = [UIColor whiteColor];
         if (@available(iOS 13.0, *)) {
             // 强制浅色外观：避免微信深色模式下顶部变黑，页面更清爽
             nav.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
@@ -61,7 +65,8 @@ static NSString *todoDateString(double ts) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"待办事项";
-    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    // 显式浅灰背景，不随深色模式变黑（参考 ThemeBox 的兜底背景思路）
+    self.view.backgroundColor = [UIColor colorWithRed:0.945 green:0.945 blue:0.957 alpha:1.0];
     // 内容从导航栏下方开始，避免和标题栏重叠
     self.edgesForExtendedLayout = UIRectEdgeNone;
 
@@ -153,7 +158,7 @@ static NSString *todoDateString(double ts) {
     self.inputField = [[UITextField alloc] initWithFrame:CGRectZero];
     self.inputField.placeholder = @"记一条待办…";
     self.inputField.font = [UIFont systemFontOfSize:15];
-    self.inputField.backgroundColor = [UIColor systemGray6Color];
+    self.inputField.backgroundColor = [UIColor colorWithRed:0.910 green:0.910 blue:0.925 alpha:1.0];
     self.inputField.layer.cornerRadius = 18;
     self.inputField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 14, 36)];
     self.inputField.leftViewMode = UITextFieldViewModeAlways;
@@ -311,6 +316,7 @@ static NSString *todoDateString(double ts) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                       reuseIdentifier:@"TodoCell"];
     }
+    cell.backgroundColor = [UIColor whiteColor];
     NSDictionary *t = self.filteredTodos[indexPath.row];
     BOOL done = [t[@"done"] boolValue];
     NSString *content = t[@"content"] ?: @"";
@@ -430,6 +436,10 @@ static NSString *todoDateString(double ts) {
 
 - (void)closeTapped {
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (UIStatusBarStyle)preferredStatusBarStyle {
+    return UIStatusBarStyleDarkContent; // 白底上用深色状态栏文字
 }
 
 #pragma mark - 键盘
