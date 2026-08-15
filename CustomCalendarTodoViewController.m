@@ -6,6 +6,7 @@
 #import "AIConfig.h"
 
 extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
+extern void todoCloseOverlay(void);  // 由 WeChatTodoTweak.m 提供
 
 #pragma mark - 日历日期 Cell
 
@@ -452,6 +453,10 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 #pragma mark - 交互
 
 - (void)closeTapped {
+    if (!self.navigationController && !self.presentingViewController) {
+        todoCloseOverlay(); // 内嵌方式打开时直接关闭
+        return;
+    }
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 

@@ -352,6 +352,7 @@ static void runTodoContactCleanupOnce(void) {
 static UIWindow *g_todoWindow = nil;
 static UIView *g_todoTabContainer = nil;
 static UIView *g_todoTabItemView = nil;
+static UIViewController *g_todoOverlayVC = nil;
 static UIImageView *g_todoTabIcon = nil;
 static UILabel *g_todoTabLabel = nil;
 static BOOL g_tabSwizzled = NO;
@@ -541,11 +542,63 @@ static TodoTabTarget *g_todoTabTarget = nil;
 
 - (void)todoTabTapped {
     diagLog(@"底部菜单「待办」tab 点击");
+    if (g_todoOverlayVC) {
+        [self setSelected:NO];
+        closeTodoOverlay();
+        return;
+    }
     [self setSelected:YES];
-    [CustomCalendarTodoViewController presentFrom:tweakTopViewController()];
+    openTodoOverlay();
+}
+
+- (void)otherTabTapped {
+    diagLog(@"其它 tab 点击，关闭待办页");
+    closeTodoOverlay();
 }
 
 @end
+
+// 内嵌打开待办页：只占底部菜单上方的内容区，底部菜单保持可见
+static void openTodoOverlay(void) {
+    if (g_todoOverlayVC) return;
+    UIWindow *window = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
+    if (!window) return;
+    UIViewController *root = window.rootViewController;
+    if (!root) return;
+    UIView *tabBar = g_todoTabContainer;
+    if (!tabBar) return;
+    CGRect tb = [tabBar convertRect:tabBar.bounds toView:window];
+    if (CGRectIsEmpty(tb) || CGRectGetMinY(tb) <= 0) return;
+
+    CustomCalendarTodoViewController *vc = [[CustomCalendarTodoViewController alloc] init];
+    [root addChildViewController:vc];
+    vc.view.frame = CGRectMake(0, 0, window.bounds.size.width, CGRectGetMinY(tb));
+    vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    vc.view.alpha = 0;
+    [root.view addSubview:vc.view];
+    [UIView animateWithDuration:0.2 animations:^{
+        vc.view.alpha = 1;
+    }];
+    [vc didMoveToParentViewController:root];
+    g_todoOverlayVC = vc;
+    diagLog(@"待办页以内嵌方式打开（底部菜单可见）");
+}
+
+static void closeTodoOverlay(void) {
+    UIViewController *vc = g_todoOverlayVC;
+    if (!vc) return;
+    [vc.view removeFromSuperview];
+    [vc removeFromParentViewController];
+    g_todoOverlayVC = nil;
+    diagLog(@"待办页已关闭");
+}
+
+// 供待办页关闭按钮调用（内嵌模式没有导航栈可退）
+void todoCloseOverlay(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        closeTodoOverlay();
+    });
+}
 
 // 生成“待办”tab 项视图（仿 MMTabBarItemView：图标 + 文字）
 static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
@@ -626,6 +679,15 @@ static void installTodoTabItem(void) {
                 method_setImplementation(m, (IMP)swz_tabLayoutSubviews);
                 g_tabSwizzled = YES;
             }
+        }
+        // 其它 4 个 tab 点击时关闭待办页（底部菜单保持可见）
+        NSArray *otherItems = viewsWithName(container, @"TabBarItem");
+        for (UIView *iv in otherItems) {
+            UITapGestureRecognizer *t =
+                [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
+                                                        action:@selector(otherTabTapped)];
+            t.cancelsTouchesInView = NO;
+            [iv addGestureRecognizer:t];
         }
         diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
                 NSStringFromClass(cls), (unsigned long)tabCount);
