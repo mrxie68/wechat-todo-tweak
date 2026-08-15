@@ -183,17 +183,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 
 - (void)buildCalendarCard {
     self.calendarCard = [[UIView alloc] initWithFrame:CGRectZero];
-    // 卡片背景用暖色淡底，突出日期小块
-    if (@available(iOS 13.0, *)) {
-        self.calendarCard.backgroundColor =
-            [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
-                return trait.userInterfaceStyle == UIUserInterfaceStyleDark
-                    ? [UIColor colorWithRed:0.22 green:0.20 blue:0.17 alpha:1.0] // 暖深灰
-                    : [UIColor colorWithRed:0.99 green:0.96 blue:0.89 alpha:1.0]; // 暖米色
-            }];
-    } else {
-        self.calendarCard.backgroundColor = [UIColor colorWithRed:0.99 green:0.96 blue:0.89 alpha:1.0];
-    }
+    self.calendarCard.backgroundColor = [UIColor systemBackgroundColor]; // 白色卡片
     self.calendarCard.layer.cornerRadius = 16;
     self.calendarCard.layer.shadowColor = [UIColor blackColor].CGColor;
     self.calendarCard.layer.shadowOpacity = 0.05;
@@ -235,6 +225,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
     self.bookmarkButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     self.bookmarkButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    self.bookmarkButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0]; // 淡蓝
     [self.bookmarkButton addTarget:self action:@selector(toggleBookmarkMode) forControlEvents:UIControlEventTouchUpInside];
     [self.calendarCard addSubview:self.bookmarkButton];
 
@@ -242,6 +233,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     [self.statsButton setTitle:@"今日统计" forState:UIControlStateNormal];
     self.statsButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     self.statsButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
+    self.statsButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0]; // 淡蓝
     [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.calendarCard addSubview:self.statsButton];
 }
@@ -393,7 +385,10 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     [self refreshDaysWithTodos];
 
     [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
-    self.bookmarkButton.tintColor = self.bookmarkMode ? kAITodoAccentColor : [UIColor labelColor];
+    // 与“今日统计”统一淡蓝；书签模式激活时加粗提示
+    self.bookmarkButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
+    self.bookmarkButton.titleLabel.font =
+        [UIFont systemFontOfSize:13 weight:(self.bookmarkMode ? UIFontWeightBold : UIFontWeightMedium)];
 
     BOOL empty = (self.listTodos.count == 0);
     self.tableView.hidden = empty;
@@ -698,9 +693,9 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     CGFloat cardY = sa.top + 48 + 10;
     CGFloat cardH = 12 + 32 + 8 + 78 + 8 + 32 + 12; // 182
     self.calendarCard.frame = CGRectMake(cardX, cardY, cardW, cardH);
-    self.prevMonthButton.frame = CGRectMake(20, 12, 32, 32);
-    self.nextMonthButton.frame = CGRectMake(cardW - 52, 12, 32, 32);
-    self.monthLabel.frame = CGRectMake(56, 12, cardW - 112, 32);
+    self.prevMonthButton.frame = CGRectMake(28, 12, 32, 32);
+    self.nextMonthButton.frame = CGRectMake(cardW - 60, 12, 32, 32);
+    self.monthLabel.frame = CGRectMake(64, 12, cardW - 128, 32);
     self.calendarView.frame = CGRectMake(0, 52, cardW, 78);
     if (!self.didInitialScroll) {
         self.didInitialScroll = YES;
