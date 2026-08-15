@@ -402,23 +402,16 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 }
 
 - (void)addTapped {
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"新建待办"
-                                                                message:nil
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    [al addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"写点什么…";
-    }];
-    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [al addAction:[UIAlertAction actionWithTitle:@"添加"
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(UIAlertAction *action) {
-        NSString *text = [al.textFields.firstObject.text stringByTrimmingCharactersInSet:
-                          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    [self presentMultilineInputWithTitle:@"新建待办"
+                             initialText:@""
+                              completion:^(NSString *text) {
+        NSString *trimmed = [text stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (text.length == 0) {
             [self showToast:@"内容不能为空"];
             return;
         }
-        MainTodoItem *item = [AITodoManager addTodo:text atDate:[self dateOnSelectedDayAtCurrentTime]];
+        MainTodoItem *item = [AITodoManager addTodo:trimmed atDate:[self dateOnSelectedDayAtCurrentTime]];
         if (item) {
             [self reloadList];
             [self scrollToTodoId:item.identifier];
@@ -431,8 +424,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
         } else {
             [self showToast:@"⚠️ 添加失败，请重试"];
         }
-    }]];
-    [self presentViewController:al animated:YES completion:nil];
+    }];
 }
 
 - (void)scrollToTodoId:(NSInteger)todoId {
@@ -490,61 +482,65 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 }
 
 - (void)editTitleForTodo:(MainTodoItem *)todo {
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"编辑待办"
-                                                                message:nil
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    [al addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = todo.title;
-    }];
-    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [al addAction:[UIAlertAction actionWithTitle:@"保存"
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(UIAlertAction *action) {
+    [self presentMultilineInputWithTitle:@"编辑待办"
+                             initialText:todo.title
+                              completion:^(NSString *text) {
         [AITodoManager updateTodo:todo.identifier
-                            title:al.textFields.firstObject.text
+                            title:text
                              note:todo.note
                               due:todo.dueDate
                        bookmarked:todo.isBookmarked];
         [self reloadList];
-    }]];
-    [self presentViewController:al animated:YES completion:nil];
+    }];
 }
 
 - (void)addSubTaskForTodo:(MainTodoItem *)todo {
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"添加子任务"
-                                                                message:nil
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    [al addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"子任务内容…";
-    }];
-    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [al addAction:[UIAlertAction actionWithTitle:@"添加"
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(UIAlertAction *action) {
-        [AITodoManager addSubTask:al.textFields.firstObject.text toTodo:todo.identifier];
+    [self presentMultilineInputWithTitle:@"添加子任务"
+                             initialText:@""
+                              completion:^(NSString *text) {
+        [AITodoManager addSubTask:text toTodo:todo.identifier];
         // 加完自动展开（内存态），让子任务立刻可见
         [self.expandedIds addObject:@(todo.identifier)];
         [self reloadList];
-    }]];
-    [self presentViewController:al animated:YES completion:nil];
+    }];
 }
 
 - (void)editSubTask:(SubTaskItem *)sub inTodo:(MainTodoItem *)todo {
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"编辑子任务"
+    [self presentMultilineInputWithTitle:@"编辑子任务"
+                             initialText:sub.title
+                              completion:^(NSString *text) {
+        [AITodoManager renameSubTask:sub.identifier inTodo:todo.identifier title:text];
+        [self reloadRowForTodo:todo];
+    }];
+}
+
+// 多行输入弹窗（新建/编辑待办与子任务共用，不再是一行的小框）
+- (void)presentMultilineInputWithTitle:(NSString *)title
+                           initialText:(NSString *)initial
+                            completion:(void (^)(NSString *text))completion {
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:title
                                                                 message:nil
                                                          preferredStyle:UIAlertControllerStyleAlert];
-    [al addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = sub.title;
-    }];
+    UIViewController *holder = [[UIViewController alloc] init];
+    holder.preferredContentSize = CGSizeMake(270, 130);
+    UITextView *tv = [[UITextView alloc] initWithFrame:CGRectMake(10, 8, 250, 112)];
+    tv.font = [UIFont systemFontOfSize:15];
+    tv.text = initial ?: @"";
+    tv.backgroundColor = [UIColor systemGray6Color];
+    tv.layer.cornerRadius = 8;
+    tv.layer.borderWidth = 0.5;
+    tv.layer.borderColor = [UIColor systemGray4Color].CGColor;
+    [holder.view addSubview:tv];
+    [al setValue:holder forKey:@"contentViewController"];
     [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [al addAction:[UIAlertAction actionWithTitle:@"保存"
+    [al addAction:[UIAlertAction actionWithTitle:@"确定"
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *action) {
-        [AITodoManager renameSubTask:sub.identifier inTodo:todo.identifier
-                               title:al.textFields.firstObject.text];
-        [self reloadRowForTodo:todo];
+        if (completion) completion(tv.text);
     }]];
-    [self presentViewController:al animated:YES completion:nil];
+    [self presentViewController:al animated:YES completion:^{
+        [tv becomeFirstResponder];
+    }];
 }
 
 #pragma mark - 日历数据源/代理

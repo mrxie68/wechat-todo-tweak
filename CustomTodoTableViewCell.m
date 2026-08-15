@@ -142,9 +142,9 @@ static UIColor *cardSelectedColor(void) {
             UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
             // 子任务行放在卡片下方（页面灰底上），不要背景，只有圈+文字
             [self.contentView addSubview:row];
-            UIButton *check = [UIButton buttonWithType:UIButtonTypeSystem];
+            UIImageView *check = [[UIImageView alloc] initWithFrame:CGRectZero];
             check.tag = 1;
-            [check addTarget:self action:@selector(subCheckTapped:) forControlEvents:UIControlEventTouchUpInside];
+            check.contentMode = UIViewContentModeScaleAspectFit;
             [row addSubview:check];
             UILongPressGestureRecognizer *rowLongPress =
                 [[UILongPressGestureRecognizer alloc] initWithTarget:self
@@ -152,6 +152,11 @@ static UIColor *cardSelectedColor(void) {
             rowLongPress.minimumPressDuration = 0.35;
             rowLongPress.delegate = self;
             [row addGestureRecognizer:rowLongPress];
+            // 整行点击 = 完成/取消完成
+            UITapGestureRecognizer *rowTap =
+                [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(subRowTapped:)];
+            [rowTap requireGestureRecognizerToFail:rowLongPress];
+            [row addGestureRecognizer:rowTap];
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
             label.tag = 2;
             label.font = [UIFont systemFontOfSize:13];
@@ -169,8 +174,8 @@ static UIColor *cardSelectedColor(void) {
     if (self.onAddSubTask) self.onAddSubTask();
 }
 
-- (void)subCheckTapped:(UIButton *)sender {
-    UIView *row = sender.superview;
+- (void)subRowTapped:(UITapGestureRecognizer *)gesture {
+    UIView *row = gesture.view;
     NSUInteger idx = [_subRows indexOfObject:row];
     if (idx != NSNotFound && idx < _todo.subTasks.count) {
         if (self.onToggleSubTask) self.onToggleSubTask(_todo.subTasks[idx]);
@@ -224,7 +229,7 @@ static UIColor *cardSelectedColor(void) {
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
         row.frame = CGRectMake(cardX + 14, y, cardW - 14, 34);
-        UIButton *check = [row viewWithTag:1];
+        UIImageView *check = (UIImageView *)[row viewWithTag:1];
         UILabel *label = [row viewWithTag:2];
         check.frame = CGRectMake(0, 6, 24, 24);
         label.frame = CGRectMake(32, 0, row.bounds.size.width - 32, 34);
@@ -233,7 +238,7 @@ static UIColor *cardSelectedColor(void) {
         if (sub) {
             UIImage *img = [UIImage systemImageNamed:sub.isCompleted ? @"checkmark.circle.fill" : @"circle"];
             img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-            [check setImage:img forState:UIControlStateNormal];
+            check.image = img;
             check.tintColor = sub.isCompleted ? kAITodoAccentColor : [UIColor systemGray3Color];
             if (sub.isCompleted) {
                 label.attributedText =
