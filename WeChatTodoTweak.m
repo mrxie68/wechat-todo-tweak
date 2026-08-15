@@ -113,6 +113,7 @@ static NSString *aiPickColumnName(NSArray *cols, NSArray *candidates) {
 + (void)noteReplySent:(NSString *)text chatId:(NSString *)chatId;
 + (BOOL)isRecentReply:(NSString *)text chatId:(NSString *)chatId;
 + (void)sendReply:(NSString *)text chatId:(NSString *)chatId;
++ (void)sendCardReplyWithTitle:(NSString *)title des:(NSString *)des chatId:(NSString *)chatId;
 + (void)presentAlertWithTitle:(NSString *)title message:(NSString *)message;
 + (NSString *)todoSessionDiagnostic;
 + (NSString *)createTodoSessionDiagnostic;
@@ -553,7 +554,15 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 
         NSString *reply = [AITodoManager handleCommand:content];
         if (reply.length > 0) {
-            [self sendReply:reply chatId:kAITodoChatId];
+            // 多行回复用卡片展示（更整齐），单行用文字
+            NSRange nl = [reply rangeOfString:@"\n"];
+            if (nl.location != NSNotFound) {
+                NSString *title = [reply substringToIndex:nl.location];
+                NSString *des = [reply substringFromIndex:NSMaxRange(nl)];
+                [self sendCardReplyWithTitle:title des:des chatId:kAITodoChatId];
+            } else {
+                [self sendReply:reply chatId:kAITodoChatId];
+            }
         }
     } @catch (NSException *e) {
         NSLog(kAITodoLogPrefix "处理消息异常: %@", e);
@@ -614,6 +623,49 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
             }
         }
         NSLog(kAITodoLogPrefix "回复待办 %@：%@", sent ? @"成功" : @"失败", text);
+    };
+    if ([NSThread isMainThread]) {
+        send();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), send);
+    }
+}
+
+// 富文本卡片回复（appmsg type 5，微信会渲染成整齐的卡片）
++ (void)sendCardReplyWithTitle:(NSString *)title des:(NSString *)des chatId:(NSString *)chatId {
+    if (chatId.length == 0) return;
+    if (title.length == 0) title = @"待办事项";
+    if (des.length == 0) des = @" ";
+    NSArray *from = @[@"&", @"<", @">", @"\""];
+    NSArray *to = @[@"&amp;", @"&lt;", @"&gt;", @"&quot;"];
+    for (NSUInteger i = 0; i < from.count; i++) {
+        title = [title stringByReplacingOccurrencesOfString:from[i] withString:to[i]];
+        des = [des stringByReplacingOccurrencesOfString:from[i] withString:to[i]];
+    }
+    NSString *xml = [NSString stringWithFormat:
+                     @"<msg><appmsg appid=\"\" sdkver=\"0\"><title>%@</title><des>%@</des>"
+                     @"<type>5</type><url></url><thumburl></thumburl></appmsg></msg>",
+                     title, des];
+    void (^send)(void) = ^{
+        CMessageMgr *mgr = wechatMessageMgr();
+        if (!mgr || ![mgr respondsToSelector:@selector(AddMsg:MsgWrap:)]) return;
+        Class wrapCls = NSClassFromString(@"CMessageWrap");
+        if (!wrapCls) return;
+        NSString *selfUsr = wechatSelfUsrName();
+        CMessageWrap *wrap = nil;
+        if (selfUsr.length > 0) {
+            wrap = [[wrapCls alloc] initWithMsgType:49 nsFromUsr:selfUsr];
+        } else {
+            wrap = [[wrapCls alloc] initWithMsgType:49];
+        }
+        if (!wrap) return;
+        [wrap setM_nsContent:xml];
+        [wrap setM_nsToUsr:chatId];
+        [wrap setM_uiMessageType:49];
+        [wrap setM_uiCreateTime:(unsigned int)time(NULL)];
+        [wrap setM_uiStatus:1];
+        [self noteReplySent:xml chatId:chatId];
+        [mgr AddMsg:chatId MsgWrap:wrap];
     };
     if ([NSThread isMainThread]) {
         send();
