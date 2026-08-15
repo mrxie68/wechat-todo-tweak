@@ -1025,6 +1025,48 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         [lines addObject:@"== 头像/图片路径：未找到 =="];
     }
 
+    // 3.6 头像加载类探测（hook 按用户名取头像的方法，给待办联系人伪造头像）
+    NSMutableArray *headClasses = [NSMutableArray array];
+    classCount = objc_getClassList(NULL, 0);
+    if (classCount > 0) {
+        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
+        objc_getClassList(classes, classCount);
+    }
+    for (int i = 0; i < classCount; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name rangeOfString:@"HeadImage"].location == NSNotFound &&
+            [name rangeOfString:@"HeadImg"].location == NSNotFound &&
+            [name rangeOfString:@"HeadPic"].location == NSNotFound) continue;
+        if ([name hasPrefix:@"NSKVONotifying"] || [name hasPrefix:@"WAMainFrame"]) continue;
+        Class c = classes[i];
+        unsigned int mcount = 0;
+        Method *methods = class_copyMethodList(c, &mcount);
+        NSMutableArray *hits = [NSMutableArray array];
+        for (unsigned int j = 0; j < mcount; j++) {
+            NSString *sel = NSStringFromSelector(method_getName(methods[j]));
+            if ([sel rangeOfString:@"userName" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [sel rangeOfString:@"headImage" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [sel hasPrefix:@"get"] || [sel hasPrefix:@"load"] || [sel hasPrefix:@"image"]) {
+                if (hits.count < 10) [hits addObject:sel];
+            }
+        }
+        free(methods);
+        if (hits.count > 0) {
+            [headClasses addObject:[NSString stringWithFormat:@"%@：%@",
+                                    name, [hits componentsJoinedByString:@" | "]]];
+        }
+    }
+    free(classes);
+    if (headClasses.count > 0) {
+        [lines addObject:@"== 头像加载类（前10个）=="];
+        for (NSString *h in headClasses) {
+            if ([lines count] - [lines indexOfObject:@"== 头像加载类（前10个）=="] > 11) break;
+            [lines addObject:[@"  " stringByAppendingString:h]];
+        }
+    } else {
+        [lines addObject:@"== 头像加载类：未找到 =="];
+    }
+
     // 4. 聊天界面类（名字含 Chat + ViewController，打开过聊天后应该已加载）
     NSMutableArray *chatVCs = [NSMutableArray array];
     classCount = objc_getClassList(NULL, 0);
