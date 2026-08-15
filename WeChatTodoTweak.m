@@ -50,6 +50,9 @@
 
 @interface CContactMgr : NSObject
 - (id)getSelfContact;
+- (void)addContact:(id)contact;
+- (void)insertContact:(id)contact;
+- (id)getContactByName:(NSString *)userName;
 @end
 
 @interface CContact : NSObject
@@ -140,15 +143,49 @@ static NSString *createTodoSessionOnMain(void) {
             return [NSString stringWithFormat:@"MMSessionInfo 无用户名属性（已有：%@）",
                     [props componentsJoinedByString:@","]];
         }
+        // 补排序/时间字段（有的排序依赖 sortTime / m_uLastTime）
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if ([props containsObject:@"sortTime"]) {
+            [session setValue:@((long long)now) forKey:@"sortTime"];
+        }
+        if ([props containsObject:@"m_uLastTime"]) {
+            [session setValue:@((unsigned int)now) forKey:@"m_uLastTime"];
+        }
         [mgr AddOrModifySession:session withNotifyFlag:YES immediateRefresh:YES];
+
+        // 回读检查：会话是否真的进了内存
+        NSString *inMemory = @"会话未入内存";
+        if ([mgr respondsToSelector:@selector(GetSessionByUserName:)]) {
+            id found = [mgr GetSessionByUserName:kAITodoChatId];
+            inMemory = found ? @"会话已入内存" : @"会话未入内存";
+        }
+
+        // 注册联系人进 CContactMgr（会话列表可能只显示已知联系人）
+        NSString *contactNote = @"联系人未注册";
+        if (setContact) {
+            id contactMgr = [center getService:NSClassFromString(@"CContactMgr")];
+            if ([contactMgr respondsToSelector:@selector(addContact:)]) {
+                [contactMgr addContact:contact];
+                contactNote = @"已调用 addContact:";
+            } else if ([contactMgr respondsToSelector:@selector(insertContact:)]) {
+                [contactMgr insertContact:contact];
+                contactNote = @"已调用 insertContact:";
+            }
+            if ([contactMgr respondsToSelector:@selector(getContactByName:)]) {
+                id known = [contactMgr getContactByName:kAITodoChatId];
+                contactNote = [contactNote stringByAppendingFormat:@"（回读%@）",
+                               known ? @"已知" : @"未知"];
+            }
+        }
         // 强制刷新会话列表（更新+重建兜底）
         Class mainMgrCls = NSClassFromString(@"MainSessionMgr");
         id mainMgr = mainMgrCls ? [center getService:mainMgrCls] : nil;
         if ([mainMgr respondsToSelector:@selector(updateMainSessionList)]) {
             [mainMgr updateMainSessionList];
         }
-        return [NSString stringWithFormat:@"✅ 已通过微信接口创建待办联系人（userName✓ / 联系人%@）",
-                setContact ? @"✓" : @"✗"];
+        return [NSString stringWithFormat:@"✅ 已创建（%@，%@）\n%@",
+                inMemory, contactNote,
+                setContact ? @"若仍不显示，下一步看 MainSessionMgr 数组" : @"联系人未挂上"];
     } @catch (NSException *e) {
         return [NSString stringWithFormat:@"⚠️ 创建异常：%@", e];
     }
