@@ -23,6 +23,13 @@ static UIColor *cardSelectedColor(void) {
     return [UIColor colorWithRed:0.85 green:0.78 blue:0.95 alpha:1.0];
 }
 
+// 估算子任务文字行数（中文按字号宽度，英文近似）
+static NSInteger todoSubLines(NSString *text, CGFloat width) {
+    if (text.length == 0) return 1;
+    CGFloat perLine = MAX(1.0, width / 13.0);
+    return MAX(1, (NSInteger)ceil(text.length / perLine));
+}
+
 @interface CustomTodoTableViewCell () <UIGestureRecognizerDelegate>
 @end
 
@@ -160,6 +167,8 @@ static UIColor *cardSelectedColor(void) {
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
             label.tag = 2;
             label.font = [UIFont systemFontOfSize:13];
+            label.numberOfLines = 0; // 长文字自动换行，完整显示
+            label.lineBreakMode = NSLineBreakByWordWrapping;
             [row addSubview:label];
             [_subRows addObject:row];
         }
@@ -228,13 +237,17 @@ static UIColor *cardSelectedColor(void) {
     CGFloat y = 4 + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
-        row.frame = CGRectMake(cardX + 14, y, cardW - 14, 34);
         UIImageView *check = (UIImageView *)[row viewWithTag:1];
         UILabel *label = [row viewWithTag:2];
-        check.frame = CGRectMake(0, 6, 24, 24);
-        label.frame = CGRectMake(32, 0, row.bounds.size.width - 32, 34);
 
         SubTaskItem *sub = (i < _todo.subTasks.count) ? _todo.subTasks[i] : nil;
+        CGFloat rowW = cardW - 14;
+        CGFloat labelW = rowW - 32;
+        NSInteger lines = sub ? todoSubLines(sub.title, labelW) : 1;
+        CGFloat rowH = MAX(34, lines * 17 + 14);
+        row.frame = CGRectMake(cardX + 14, y, rowW, rowH);
+        check.frame = CGRectMake(0, (rowH - 24) / 2.0, 24, 24);
+        label.frame = CGRectMake(32, 4, labelW, rowH - 8);
         if (sub) {
             UIImage *img = [UIImage systemImageNamed:sub.isCompleted ? @"checkmark.circle.fill" : @"circle"];
             img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -253,13 +266,22 @@ static UIColor *cardSelectedColor(void) {
                 label.textColor = [UIColor labelColor];
             }
         }
-        y += 34;
+        y += rowH;
     }
 }
 
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
     CGFloat mainH = 64;
-    CGFloat subH = todo.isSelected ? todo.subTasks.count * 34.0 : 0;
+    CGFloat subH = 0;
+    if (todo.isSelected) {
+        CGFloat cardX = 64, cardRight = 12;
+        CGFloat cardW = width - cardX - cardRight;
+        CGFloat labelW = cardW - 14 - 32;
+        for (SubTaskItem *s in todo.subTasks) {
+            NSInteger lines = todoSubLines(s.title, labelW);
+            subH += MAX(34, lines * 17 + 14);
+        }
+    }
     return 4 + mainH + 4 + subH + 4;
 }
 
