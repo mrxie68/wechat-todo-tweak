@@ -500,6 +500,10 @@ static void swz_tabLayoutSubviews(id self, SEL _cmd) {
     }
 }
 
+// 前向声明（定义在下方）
+static void openTodoOverlay(void);
+static void closeTodoOverlay(void);
+
 @interface TodoTabTarget : NSObject
 @end
 
