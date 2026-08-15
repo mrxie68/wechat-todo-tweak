@@ -630,10 +630,6 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
         }
         [self reloadRowForTodo:todo];
     };
-    cell.onToggleBookmark = ^{
-        [AITodoManager toggleBookmarkForTodo:todo.identifier];
-        [self reloadRowForTodo:todo];
-    };
     cell.onAddSubTask = ^{
         [self addSubTaskForTodo:todo];
     };
@@ -668,6 +664,22 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
         completion(YES);
     }];
     return [UISwipeActionsConfiguration configurationWithActions:@[del]];
+}
+
+// 右滑 = 收藏/取消收藏
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
+    leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    MainTodoItem *todo = self.listTodos[indexPath.row];
+    UIContextualAction *bookmark = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleNormal
+                            title:todo.isBookmarked ? @"取消书签" : @"书签"
+                          handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+        [AITodoManager toggleBookmarkForTodo:todo.identifier];
+        [self reloadList];
+        completion(YES);
+    }];
+    bookmark.backgroundColor = [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0]; // 金色
+    return [UISwipeActionsConfiguration configurationWithActions:@[bookmark]];
 }
 
 #pragma mark - 布局

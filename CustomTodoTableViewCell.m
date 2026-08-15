@@ -76,10 +76,6 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         _titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         [self.cardView addSubview:_titleLabel];
 
-        _bookmarkButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_bookmarkButton addTarget:self action:@selector(bookmarkTapped) forControlEvents:UIControlEventTouchUpInside];
-        [self.cardView addSubview:_bookmarkButton];
-
         _plusButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [_plusButton addTarget:self action:@selector(plusTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.cardView addSubview:_plusButton];
@@ -151,13 +147,6 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         _titleLabel.textColor = [UIColor labelColor];
     }
 
-    // 书签：金色实心=已书签，灰色空心=未书签
-    UIImage *book = [UIImage systemImageNamed:todo.isBookmarked ? @"bookmark.fill" : @"bookmark"];
-    [_bookmarkButton setImage:book forState:UIControlStateNormal];
-    _bookmarkButton.tintColor = todo.isBookmarked
-        ? [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0]
-        : [UIColor systemGray3Color];
-
     // 加号
     UIImage *plus = [UIImage systemImageNamed:@"plus.circle.fill"];
     [_plusButton setImage:plus forState:UIControlStateNormal];
@@ -195,10 +184,6 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             [_subRows addObject:row];
         }
     }
-}
-
-- (void)bookmarkTapped {
-    if (self.onToggleBookmark) self.onToggleBookmark();
 }
 
 - (void)plusTapped {
@@ -255,8 +240,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 
     CGFloat rightX = cardW - 12;
     _plusButton.frame = CGRectMake(rightX - 38, headerH + (mainH - 38) / 2.0, 38, 38);
-    _bookmarkButton.frame = CGRectMake(rightX - 38 - 30, headerH + (mainH - 26) / 2.0, 26, 26);
-    _titleLabel.frame = CGRectMake(56, headerH + 6, cardW - 56 - 104, mainH - 12);
+    _titleLabel.frame = CGRectMake(56, headerH + 6, cardW - 56 - 50, mainH - 12);
 
     CGFloat y = 4 + headerH + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
