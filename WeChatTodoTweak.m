@@ -75,6 +75,7 @@
 @interface MMNewSessionMgr : NSObject
 - (id)AddOrModifySession:(id)session withNotifyFlag:(BOOL)flag immediateRefresh:(BOOL)refresh;
 - (void)DeleteSessionOfUser:(NSString *)userName;
+- (id)GetSessionByUserName:(NSString *)userName;
 @end
 
 @interface MainSessionMgr : NSObject
@@ -104,6 +105,7 @@ static NSString *createTodoSessionOnMain(void) {
     if (!infoCls) return @"MMSessionInfo 类不存在";
     id session = [[infoCls alloc] init];
     if (!session) return @"MMSessionInfo 初始化失败";
+    id contact = nil; // 联系人对象（可能在下方 if 里创建，外面也要用）
     NSMutableArray *props = [NSMutableArray array];
     unsigned int pc = 0;
     objc_property_t *plist = class_copyPropertyList(infoCls, &pc);
@@ -126,7 +128,7 @@ static NSString *createTodoSessionOnMain(void) {
         if ([props containsObject:@"m_contact"]) {
             Class contactCls = NSClassFromString(@"CContact");
             if (contactCls) {
-                id contact = [[contactCls alloc] init];
+                contact = [[contactCls alloc] init];
                 if (contact) {
                     if ([contact respondsToSelector:@selector(setM_nsUsrName:)]) {
                         [contact setM_nsUsrName:kAITodoChatId];
