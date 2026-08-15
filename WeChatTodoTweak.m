@@ -164,6 +164,8 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 + (void)sendReply:(NSString *)text chatId:(NSString *)chatId;
 + (void)presentAlertWithTitle:(NSString *)title message:(NSString *)message;
 + (NSString *)todoSessionDiagnostic;
++ (NSString *)createTodoSessionDiagnostic;
++ (NSString *)removeTodoSessionDiagnostic;
 @end
 
 @implementation WeChatTodoHandler
@@ -300,6 +302,102 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 
 + (NSString *)todoSessionDiagnostic {
     return ensureTodoSessionDiagnostic();
+}
+
++ (NSString *)createTodoSessionDiagnostic {
+    NSString *selfUsr = wechatSelfUsrName();
+    NSString *md5 = selfUsr.length > 0 ? aiMD5Hex(selfUsr) : @"";
+    NSArray *dbs = aiFindDatabaseFiles();
+    for (NSDictionary *d in dbs) {
+        NSString *path = (NSString *)d[@"path"];
+        if ([path.lowercaseString rangeOfString:@"session"].location == NSNotFound) continue;
+        // 只写当前账号的 session.db（账号目录下的优先）
+        if (md5.length > 0 && [path rangeOfString:md5].location == NSNotFound) continue;
+        sqlite3 *db = NULL;
+        if (sqlite3_open_v2([path UTF8String], &db,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
+            if (db) sqlite3_close(db);
+            continue;
+        }
+        sqlite3_busy_timeout(db, 3000);
+        NSArray *tables = aiSQLiteTableNames(db);
+        for (NSString *tbl in tables) {
+            if (![tbl isEqualToString:@"SessionTable"]) continue;
+            NSArray *cols = aiSQLiteColumns(db, tbl);
+            if (![cols containsObject:@"sessionId"]) continue;
+            // 已存在？
+            sqlite3_stmt *stmt = NULL;
+            int count = 0;
+            NSString *existsSql = @"SELECT COUNT(*) FROM \"SessionTable\" WHERE \"sessionId\" = ?";
+            if (sqlite3_prepare_v2(db, [existsSql UTF8String], -1, &stmt, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(stmt) == SQLITE_ROW) {
+                    count = sqlite3_column_int(stmt, 0);
+                }
+            }
+            sqlite3_finalize(stmt);
+            if (count > 0) {
+                sqlite3_close(db);
+                return [NSString stringWithFormat:@"✅ 待办联系人已存在（%@）", path.lastPathComponent];
+            }
+            // 只填 sessionId，其余列交给默认值
+            sqlite3_stmt *istmt = NULL;
+            int rc = sqlite3_prepare_v2(db,
+                                        "INSERT INTO \"SessionTable\" (\"sessionId\") VALUES (?)",
+                                        -1, &istmt, NULL);
+            if (rc == SQLITE_OK) {
+                sqlite3_bind_text(istmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
+                rc = sqlite3_step(istmt);
+            }
+            sqlite3_finalize(istmt);
+            sqlite3_close(db);
+            if (rc == SQLITE_DONE) {
+                return [NSString stringWithFormat:
+                        @"✅ 已写入待办联系人（%@）\n若列表没出现，重启微信看看；删除请用“移除待办联系人”。",
+                        path.lastPathComponent];
+            }
+            return [NSString stringWithFormat:@"⚠️ 插入失败（rc=%d），可能需要更多必填列，见日志", rc];
+        }
+        sqlite3_close(db);
+    }
+    return @"未找到当前账号的 SessionTable（session.db）";
+}
+
++ (NSString *)removeTodoSessionDiagnostic {
+    NSString *selfUsr = wechatSelfUsrName();
+    NSString *md5 = selfUsr.length > 0 ? aiMD5Hex(selfUsr) : @"";
+    NSArray *dbs = aiFindDatabaseFiles();
+    for (NSDictionary *d in dbs) {
+        NSString *path = (NSString *)d[@"path"];
+        if ([path.lowercaseString rangeOfString:@"session"].location == NSNotFound) continue;
+        if (md5.length > 0 && [path rangeOfString:md5].location == NSNotFound) continue;
+        sqlite3 *db = NULL;
+        if (sqlite3_open_v2([path UTF8String], &db,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
+            if (db) sqlite3_close(db);
+            continue;
+        }
+        sqlite3_busy_timeout(db, 3000);
+        NSArray *tables = aiSQLiteTableNames(db);
+        for (NSString *tbl in tables) {
+            if (![tbl isEqualToString:@"SessionTable"]) continue;
+            sqlite3_stmt *stmt = NULL;
+            int rc = sqlite3_prepare_v2(db,
+                                        "DELETE FROM \"SessionTable\" WHERE \"sessionId\" = ?",
+                                        -1, &stmt, NULL);
+            if (rc == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, [kAITodoChatId UTF8String], -1, SQLITE_TRANSIENT);
+                rc = sqlite3_step(stmt);
+            }
+            sqlite3_finalize(stmt);
+            sqlite3_close(db);
+            return rc == SQLITE_DONE
+                ? [NSString stringWithFormat:@"🗑 已移除待办联系人（%@）", path.lastPathComponent]
+                : [NSString stringWithFormat:@"⚠️ 移除失败（rc=%d）", rc];
+        }
+        sqlite3_close(db);
+    }
+    return @"未找到当前账号的 SessionTable（session.db）";
 }
 
 @end

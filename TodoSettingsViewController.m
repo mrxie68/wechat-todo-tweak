@@ -6,6 +6,8 @@
 // 由 WeChatTodoTweak 提供（同一个 dylib 内）
 @interface WeChatTodoHandler : NSObject
 + (NSString *)todoSessionDiagnostic;
++ (NSString *)createTodoSessionDiagnostic;
++ (NSString *)removeTodoSessionDiagnostic;
 @end
 
 @interface TodoSettingsViewController () <UITextFieldDelegate>
@@ -152,6 +154,26 @@
     [sessionCard addSubview:createBtn];
     y += 110 + 12;
 
+    UIButton *writeBtn = [self makeButton:@"✍️ 创建待办联系人（写入会话表）"];
+    writeBtn.frame = CGRectMake(x, y, cardW, 44);
+    [writeBtn addTarget:self action:@selector(createSessionTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:writeBtn];
+    y += 44 + 8;
+
+    UIButton *removeWriteBtn = [self makeButton:@"🗑 移除待办联系人（清理写入）"];
+    removeWriteBtn.frame = CGRectMake(x, y, cardW, 44);
+    [removeWriteBtn addTarget:self action:@selector(removeSessionTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:removeWriteBtn];
+    y += 44 + 12;
+
+    UILabel *versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, y, w, 24)];
+    versionLabel.text = [NSString stringWithFormat:@"待办插件 v%@", kAITodoVersion];
+    versionLabel.textAlignment = NSTextAlignmentCenter;
+    versionLabel.font = [UIFont systemFontOfSize:12];
+    versionLabel.textColor = [UIColor secondaryLabelColor];
+    [self.contentView addSubview:versionLabel];
+    y += 24 + 12;
+
     self.contentView.frame = CGRectMake(0, 0, w, y);
     self.scrollView.contentSize = CGSizeMake(w, y);
 
@@ -242,6 +264,54 @@
             self.sessionStatusLabel.text = shortText;
             [progress dismissViewControllerAnimated:NO completion:^{
                 UIAlertController *r = [UIAlertController alertControllerWithTitle:@"待办联系人"
+                                                                           message:shortText
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:r animated:YES completion:nil];
+            }];
+        });
+    });
+}
+
+- (void)createSessionTapped {
+    [self.view endEditing:YES];
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"创建待办联系人"
+                                                                     message:@"将往微信会话表写入一行待办联系人（sessionId=todo@local）。\n写入微信数据有极小风险，如出现异常请立刻移除。确定写入？"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"写入"
+                                                style:UIAlertActionStyleDestructive
+                                              handler:^(UIAlertAction *action) {
+        [self runTodoWrite:^{ return [WeChatTodoHandler createTodoSessionDiagnostic]; }];
+    }]];
+    [self presentViewController:confirm animated:YES completion:nil];
+}
+
+- (void)removeSessionTapped {
+    [self.view endEditing:YES];
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"移除待办联系人"
+                                                                     message:@"将从会话表删除待办联系人（sessionId=todo@local）的写入。确定移除？"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"移除"
+                                                style:UIAlertActionStyleDestructive
+                                              handler:^(UIAlertAction *action) {
+        [self runTodoWrite:^{ return [WeChatTodoHandler removeTodoSessionDiagnostic]; }];
+    }]];
+    [self presentViewController:confirm animated:YES completion:nil];
+}
+
+- (void)runTodoWrite:(NSString *(^)(void))block {
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"请稍候"
+                                                                     message:@"正在操作会话表…\n\n"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:progress animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *diag = block();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *shortText = [self consumeDiagnostic:diag];
+            [progress dismissViewControllerAnimated:NO completion:^{
+                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"结果"
                                                                            message:shortText
                                                                     preferredStyle:UIAlertControllerStyleAlert];
                 [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
