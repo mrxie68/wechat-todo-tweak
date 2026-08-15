@@ -8,6 +8,7 @@
 @property (nonatomic, copy) void (^onToggleBookmark)(void); // 书签
 @property (nonatomic, copy) void (^onAddSubTask)(void);     // 加子任务
 @property (nonatomic, copy) void (^onToggleSubTask)(SubTaskItem *sub);
+@property (nonatomic, copy) void (^onEditSubTask)(SubTaskItem *sub);
 @property (nonatomic, copy) void (^onLongPress)(void);
 
 @property (nonatomic, strong) MainTodoItem *todo;
@@ -19,6 +20,8 @@
 @property (nonatomic, strong) UIButton *bookmarkButton;
 @property (nonatomic, strong) UIButton *plusButton;
 @property (nonatomic, strong) NSMutableArray *subRows;
+@property (nonatomic, strong) UITapGestureRecognizer *cardTapGesture;
+@property (nonatomic, strong) UILongPressGestureRecognizer *cardLongPressGesture;
 
 - (void)configureWithTodo:(MainTodoItem *)todo;
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width;

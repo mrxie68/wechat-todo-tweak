@@ -100,6 +100,7 @@
 @property (nonatomic, strong) NSArray<MainTodoItem *> *listTodos;
 @property (nonatomic, assign) BOOL didInitialScroll;
 @property (nonatomic, strong) NSSet *daysWithTodos;
+@property (nonatomic, strong) NSMutableSet *expandedIds; // 展开状态只存内存，互不影响
 @end
 
 @implementation CustomCalendarTodoViewController
@@ -119,6 +120,7 @@
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.selectedDay = [NSDate date];
     self.currentMonth = [NSDate date];
+    self.expandedIds = [NSMutableSet set];
 
     [self buildTopBar];
     [self buildMonthRow];
@@ -491,9 +493,27 @@
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *action) {
         [AITodoManager addSubTask:al.textFields.firstObject.text toTodo:todo.identifier];
-        // 加完自动展开，让子任务立刻可见（否则看不见会重复点添加）
-        [AITodoManager setTodo:todo.identifier selected:YES];
+        // 加完自动展开（内存态），让子任务立刻可见
+        [self.expandedIds addObject:@(todo.identifier)];
         [self reloadList];
+    }]];
+    [self presentViewController:al animated:YES completion:nil];
+}
+
+- (void)editSubTask:(SubTaskItem *)sub inTodo:(MainTodoItem *)todo {
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"编辑子任务"
+                                                                message:nil
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [al addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = sub.title;
+    }];
+    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [al addAction:[UIAlertAction actionWithTitle:@"保存"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *action) {
+        [AITodoManager renameSubTask:sub.identifier inTodo:todo.identifier
+                               title:al.textFields.firstObject.text];
+        [self reloadRowForTodo:todo];
     }]];
     [self presentViewController:al animated:YES completion:nil];
 }
@@ -541,9 +561,14 @@
                                               reuseIdentifier:@"TodoCardCell"];
     }
     MainTodoItem *todo = self.listTodos[indexPath.row];
+    todo.isSelected = [self.expandedIds containsObject:@(todo.identifier)];
     [cell configureWithTodo:todo];
     cell.onToggleSelect = ^{
-        [AITodoManager setTodo:todo.identifier selected:!todo.isSelected];
+        if ([self.expandedIds containsObject:@(todo.identifier)]) {
+            [self.expandedIds removeObject:@(todo.identifier)];
+        } else {
+            [self.expandedIds addObject:@(todo.identifier)];
+        }
         [self reloadRowForTodo:todo];
     };
     cell.onToggleBookmark = ^{
@@ -557,6 +582,9 @@
         [AITodoManager toggleSubTask:sub.identifier inTodo:todo.identifier];
         [self reloadRowForTodo:todo];
     };
+    cell.onEditSubTask = ^(SubTaskItem *sub) {
+        [self editSubTask:sub inTodo:todo];
+    };
     cell.onLongPress = ^{
         [self editTitleForTodo:todo];
     };
@@ -565,6 +593,7 @@
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
     MainTodoItem *todo = self.listTodos[indexPath.row];
+    todo.isSelected = [self.expandedIds containsObject:@(todo.identifier)];
     return [CustomTodoTableViewCell heightForTodo:todo width:tableView.bounds.size.width];
 }
 

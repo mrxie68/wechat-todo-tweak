@@ -33,7 +33,6 @@
         NSSet *subClasses = [NSSet setWithObjects:[NSArray class], [NSMutableArray class], [SubTaskItem class], nil];
         NSArray *subs = [coder decodeObjectOfClasses:subClasses forKey:@"subTasks"];
         _subTasks = [NSMutableArray arrayWithArray:subs ?: @[]];
-        _isSelected = [coder decodeBoolForKey:@"isSelected"];
         _isBookmarked = [coder decodeBoolForKey:@"isBookmarked"];
         _done = [coder decodeBoolForKey:@"done"];
         _doneAt = [coder decodeObjectOfClass:[NSDate class] forKey:@"doneAt"];
@@ -48,7 +47,6 @@
     [coder encodeObject:self.title ?: @"" forKey:@"title"];
     [coder encodeObject:self.createTime ?: [NSDate date] forKey:@"createTime"];
     [coder encodeObject:self.subTasks ?: @[] forKey:@"subTasks"];
-    [coder encodeBool:self.isSelected forKey:@"isSelected"];
     [coder encodeBool:self.isBookmarked forKey:@"isBookmarked"];
     [coder encodeBool:self.done forKey:@"done"];
     [coder encodeObject:self.doneAt forKey:@"doneAt"];

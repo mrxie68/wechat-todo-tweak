@@ -61,14 +61,14 @@ static UIColor *cardSelectedColor(void) {
         [_plusButton addTarget:self action:@selector(plusTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.cardView addSubview:_plusButton];
 
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
-                                                                             action:@selector(cardTapped)];
-        tap.delegate = self;
-        [self.cardView addGestureRecognizer:tap];
-        UILongPressGestureRecognizer *longPress =
+        self.cardTapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                     action:@selector(cardTapped)];
+        self.cardTapGesture.delegate = self;
+        [self.cardView addGestureRecognizer:self.cardTapGesture];
+        self.cardLongPressGesture =
             [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(cardLongPressed:)];
-        longPress.delegate = self;
-        [self.cardView addGestureRecognizer:longPress];
+        self.cardLongPressGesture.delegate = self;
+        [self.cardView addGestureRecognizer:self.cardLongPressGesture];
 
         _subRows = [NSMutableArray array];
     }
@@ -132,14 +132,20 @@ static UIColor *cardSelectedColor(void) {
     if (todo.isSelected) {
         for (SubTaskItem *sub in todo.subTasks) {
             UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
+            row.backgroundColor = todo.isSelected
+                ? [UIColor colorWithWhite:1.0 alpha:0.16]
+                : [UIColor colorWithWhite:1.0 alpha:0.55];
+            row.layer.cornerRadius = 8;
             [self.cardView addSubview:row];
             UIButton *check = [UIButton buttonWithType:UIButtonTypeSystem];
             check.tag = 1;
             [check addTarget:self action:@selector(subCheckTapped:) forControlEvents:UIControlEventTouchUpInside];
             [row addSubview:check];
-            UITapGestureRecognizer *rowTap =
-                [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(subRowTapped:)];
-            [row addGestureRecognizer:rowTap];
+            UILongPressGestureRecognizer *rowLongPress =
+                [[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                              action:@selector(subRowLongPressed:)];
+            rowLongPress.delegate = self;
+            [row addGestureRecognizer:rowLongPress];
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
             label.tag = 2;
             label.font = [UIFont systemFontOfSize:13];
@@ -165,21 +171,26 @@ static UIColor *cardSelectedColor(void) {
     }
 }
 
-- (void)subRowTapped:(UITapGestureRecognizer *)gesture {
-    NSUInteger idx = [_subRows indexOfObject:gesture.view];
-    if (idx != NSNotFound && idx < _todo.subTasks.count) {
-        if (self.onToggleSubTask) self.onToggleSubTask(_todo.subTasks[idx]);
-    }
-}
-
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
        shouldReceiveTouch:(UITouch *)touch {
-    // 按钮（加号/书签/勾选）和子任务行上的触摸不触发卡片展开/长按
-    if ([touch.view isKindOfClass:[UIControl class]]) return NO;
-    for (UIView *row in _subRows) {
-        if ([touch.view isDescendantOfView:row]) return NO;
+    if (gestureRecognizer == self.cardTapGesture ||
+        gestureRecognizer == self.cardLongPressGesture) {
+        // 卡片手势：按钮（加号/书签/勾选）和子任务行不触发
+        if ([touch.view isKindOfClass:[UIControl class]]) return NO;
+        for (UIView *row in _subRows) {
+            if ([touch.view isDescendantOfView:row]) return NO;
+        }
+        return YES;
     }
-    return YES;
+    return YES; // 子任务行长按等其它手势照常接收
+}
+
+- (void)subRowLongPressed:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateBegan) return;
+    NSUInteger idx = [_subRows indexOfObject:gesture.view];
+    if (idx != NSNotFound && idx < _todo.subTasks.count) {
+        if (self.onEditSubTask) self.onEditSubTask(_todo.subTasks[idx]);
+    }
 }
 
 - (void)layoutSubviews {
@@ -206,11 +217,11 @@ static UIColor *cardSelectedColor(void) {
     CGFloat y = mainH;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
-        row.frame = CGRectMake(0, y, cardW, 34);
+        row.frame = CGRectMake(10, y + 4, cardW - 20, 34);
         UIButton *check = [row viewWithTag:1];
         UILabel *label = [row viewWithTag:2];
-        check.frame = CGRectMake(14, 6, 22, 22);
-        label.frame = CGRectMake(44, 0, cardW - 44 - 34, 34);
+        check.frame = CGRectMake(8, 6, 24, 24);
+        label.frame = CGRectMake(40, 0, row.bounds.size.width - 48, 34);
 
         SubTaskItem *sub = (i < _todo.subTasks.count) ? _todo.subTasks[i] : nil;
         if (sub) {
@@ -232,13 +243,13 @@ static UIColor *cardSelectedColor(void) {
                 label.textColor = _todo.isSelected ? [UIColor whiteColor] : [UIColor labelColor];
             }
         }
-        y += 34;
+        y += 38;
     }
 }
 
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
     CGFloat mainH = 64;
-    CGFloat subH = todo.isSelected ? todo.subTasks.count * 34.0 : 0;
+    CGFloat subH = todo.isSelected ? todo.subTasks.count * 38.0 : 0;
     return mainH + subH + 8;
 }
 
