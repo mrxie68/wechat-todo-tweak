@@ -1131,6 +1131,47 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         [lines addObject:@"== HeadImage 相关类：未找到 =="];
     }
 
+    // 3.8 FIC 头像类完整方法/属性（含类方法），确认 drawingBlockForImage 与 entityUUID
+    for (NSString *cn in @[@"MMFICMainFrameHeadImg", @"MMFICContactsHeadImg",
+                           @"MMFICBaseHeadImage", @"MMHeadImageHelper"]) {
+        Class c = NSClassFromString(cn);
+        if (!c) {
+            [lines addObject:[NSString stringWithFormat:@"%@：类不存在", cn]];
+            continue;
+        }
+        [lines addObject:[NSString stringWithFormat:@"== %@ 完整 ==", cn]];
+        unsigned int mcount = 0;
+        Method *methods = class_copyMethodList(c, &mcount);
+        NSMutableArray *inst = [NSMutableArray array];
+        for (unsigned int j = 0; j < mcount && inst.count < 25; j++) {
+            [inst addObject:NSStringFromSelector(method_getName(methods[j]))];
+        }
+        free(methods);
+        [lines addObject:[NSString stringWithFormat:@"  实例: %@", [inst componentsJoinedByString:@" | "]]];
+        unsigned int cmcount = 0;
+        Method *cmethods = class_copyMethodList(object_getClass(c), &cmcount);
+        NSMutableArray *cls = [NSMutableArray array];
+        for (unsigned int j = 0; j < cmcount && cls.count < 15; j++) {
+            [cls addObject:[@"+" stringByAppendingString:
+                            NSStringFromSelector(method_getName(cmethods[j]))]];
+        }
+        free(cmethods);
+        if (cls.count > 0) {
+            [lines addObject:[NSString stringWithFormat:@"  类方法: %@", [cls componentsJoinedByString:@" | "]]];
+        }
+        unsigned int pcount = 0;
+        objc_property_t *props = class_copyPropertyList(c, &pcount);
+        NSMutableArray *ps = [NSMutableArray array];
+        for (unsigned int j = 0; j < pcount && ps.count < 15; j++) {
+            const char *pn = property_getName(props[j]);
+            if (pn) [ps addObject:[NSString stringWithUTF8String:pn]];
+        }
+        free(props);
+        if (ps.count > 0) {
+            [lines addObject:[NSString stringWithFormat:@"  属性: %@", [ps componentsJoinedByString:@" | "]]];
+        }
+    }
+
     // 4. 聊天界面类（名字含 Chat + ViewController，打开过聊天后应该已加载）
     NSMutableArray *chatVCs = [NSMutableArray array];
     classCount = objc_getClassList(NULL, 0);
