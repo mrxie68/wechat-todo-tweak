@@ -93,6 +93,11 @@ static NSString *aiMD5Hex(NSString *input);
 static NSArray *aiFindDatabaseFiles(void);
 static NSArray *aiSQLiteTableNames(sqlite3 *db);
 static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
+static UIViewController *tweakTopViewController(void); // 前向声明（定义在下方）
+
+@interface WeChatTodoHandler : NSObject
++ (void)sendReply:(NSString *)text chatId:(NSString *)chatId;
+@end
 
 // 找到聊天列表主界面 VC（NewMainFrameViewController）
 static UIViewController *findNewMainFrameVC(void) {
