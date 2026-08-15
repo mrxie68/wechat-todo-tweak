@@ -42,16 +42,16 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         self.backgroundColor = [UIColor clearColor];
         self.selectionStyle = UITableViewCellSelectionStyleNone;
 
-        // 时间：卡片外左上
+        // 时间：卡片内左上（两行布局的第一行）
         _timeLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _timeLabel.font = [UIFont systemFontOfSize:12];
         _timeLabel.textColor = [UIColor secondaryLabelColor];
-        [self.contentView addSubview:_timeLabel];
 
         _cardView = [[UIView alloc] initWithFrame:CGRectZero];
         _cardView.layer.cornerRadius = 14;
         _cardView.clipsToBounds = YES;
         [self.contentView addSubview:_cardView];
+        [self.cardView addSubview:_timeLabel];
 
         // 金色书签条（薄条，收藏时显示，不改变卡片高度）
         _bookmarkStrip = [[UIView alloc] initWithFrame:CGRectZero];
@@ -227,23 +227,23 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
-    CGFloat mainH = 64;
-    CGFloat cardX = 64;
-    CGFloat cardW = w - cardX - 12;
+    CGFloat timeH = 20;
+    CGFloat mainY = 26;
+    CGFloat mainH = 58;
+    CGFloat cardX = 16;
+    CGFloat cardW = w - cardX - 16;
 
-    // 时间在卡片外左上，高度固定，不与卡片冲突
-    _timeLabel.frame = CGRectMake(12, 6, 46, 16);
-
-    _cardView.frame = CGRectMake(cardX, 4, cardW, mainH);
+    _cardView.frame = CGRectMake(cardX, 4, cardW, timeH + mainH);
     _bookmarkStrip.frame = CGRectMake(0, 0, cardW, 4);
+    _timeLabel.frame = CGRectMake(12, 6, 120, 16);
 
     CGFloat iconSize = 34;
-    _iconBg.frame = CGRectMake(12, (mainH - iconSize) / 2.0, iconSize, iconSize);
+    _iconBg.frame = CGRectMake(12, mainY + (mainH - iconSize) / 2.0, iconSize, iconSize);
     _iconView.frame = CGRectInset(_iconBg.bounds, 8, 8);
-    _plusButton.frame = CGRectMake(cardW - 12 - 38, (mainH - 38) / 2.0, 38, 38);
-    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 60, mainH - 12);
+    _plusButton.frame = CGRectMake(cardW - 12 - 38, mainY + (mainH - 38) / 2.0, 38, 38);
+    _titleLabel.frame = CGRectMake(56, mainY + 4, cardW - 56 - 60, mainH - 8);
 
-    CGFloat y = 4 + mainH + 4;
+    CGFloat y = 4 + timeH + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
         UIImageView *check = (UIImageView *)[row viewWithTag:1];
@@ -284,10 +284,9 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 }
 
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
-    CGFloat mainH = 64;
     CGFloat subH = 0;
     if (todo.isSelected) {
-        CGFloat cardX = 64, cardRight = 12; // 与 layoutSubviews 保持一致
+        CGFloat cardX = 16, cardRight = 16; // 与 layoutSubviews 保持一致
         CGFloat cardW = width - cardX - cardRight;
         CGFloat labelW = cardW - 14 - 32;
         if (todo.subTasks.count == 0) {
@@ -299,7 +298,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             }
         }
     }
-    return 4 + mainH + 4 + subH + 4;
+    return 4 + 20 + 58 + 4 + subH + 4;
 }
 
 @end

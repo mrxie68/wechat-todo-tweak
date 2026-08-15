@@ -321,7 +321,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 
 - (void)buildList {
     self.listHeaderLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.listHeaderLabel.font = [UIFont boldSystemFontOfSize:17];
+    self.listHeaderLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     self.listHeaderLabel.textColor = [UIColor labelColor];
     [self.view addSubview:self.listHeaderLabel];
 
@@ -747,7 +747,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     title.frame = CGRectMake(100, sa.top, w - 200, 44);
 
     // 白色日历卡片：月份行 + 日期条 + 底部行（书签/统计）
-    CGFloat cardX = 24, cardW = w - 48; // 卡片整体往内收
+    CGFloat cardX = 16, cardW = w - 32; // 与页面其它元素同边距
     CGFloat cardY = sa.top + 48 + 10;
     CGFloat cardH = 12 + 32 + 8 + 78 + 12; // 142
     self.calendarCard.frame = CGRectMake(cardX, cardY, cardW, cardH);
@@ -760,12 +760,12 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
         self.didInitialScroll = YES;
         [self scrollToSelectedDayAnimated:NO]; // 首次布局后再定位到今天，保证可见
     }
-    // 全部书签 / 今日统计：日历卡片下方
-    CGFloat rowY = cardY + cardH + 8;
-    self.bookmarkButton.frame = CGRectMake(cardX, rowY, cardW / 2.0, 30);
-    self.statsButton.frame = CGRectMake(cardX + cardW / 2.0, rowY, cardW / 2.0, 30);
+    // 全部书签 / 今日统计：日历卡片下方（拉开间距）
+    CGFloat rowY = cardY + cardH + 10;
+    self.bookmarkButton.frame = CGRectMake(cardX, rowY, cardW / 2.0, 28);
+    self.statsButton.frame = CGRectMake(cardX + cardW / 2.0, rowY, cardW / 2.0, 28);
 
-    CGFloat headerY = rowY + 30 + 8;
+    CGFloat headerY = rowY + 28 + 12;
     self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 130, 24);
     self.todayButton.frame = CGRectMake(w - 110, headerY, 90, 24);
 
