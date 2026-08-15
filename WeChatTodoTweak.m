@@ -81,6 +81,8 @@
 @interface MainSessionMgr : NSObject
 - (void)updateMainSessionList;
 - (void)rebuildMainSessions;
+- (NSArray *)normalSessions;
+- (void)setNormalSessions:(NSArray *)sessions;
 @end
 
 static NSString *ensureTodoSessionDiagnostic(void); // 前向声明（定义在下方）
@@ -128,7 +130,11 @@ static NSString *createTodoSessionOnMain(void) {
         if ([props containsObject:@"m_contact"]) {
             Class contactCls = NSClassFromString(@"CContact");
             if (contactCls) {
-                contact = [[contactCls alloc] init];
+                if ([contactCls instancesRespondToSelector:@selector(initWithContactName:)]) {
+                    contact = [[contactCls alloc] initWithContactName:kAITodoChatId];
+                } else {
+                    contact = [[contactCls alloc] init];
+                }
                 if (contact) {
                     if ([contact respondsToSelector:@selector(setM_nsUsrName:)]) {
                         [contact setM_nsUsrName:kAITodoChatId];
@@ -182,12 +188,43 @@ static NSString *createTodoSessionOnMain(void) {
         // 强制刷新会话列表（更新+重建兜底）
         Class mainMgrCls = NSClassFromString(@"MainSessionMgr");
         id mainMgr = mainMgrCls ? [center getService:mainMgrCls] : nil;
+        NSMutableArray *diags = [NSMutableArray array];
+        [diags addObject:inMemory];
+        // AddOrModifySession 未入内存时，直接往 MainSessionMgr.normalSessions 追加（先核对元素类型）
+        if ([inMemory hasPrefix:@"会话未入"] && mainMgr &&
+            [mainMgr respondsToSelector:@selector(normalSessions)] &&
+            [mainMgr respondsToSelector:@selector(setNormalSessions:)]) {
+            NSArray *normal = [mainMgr normalSessions];
+            [diags addObject:[NSString stringWithFormat:@"normalSessions=%lu", (unsigned long)normal.count]];
+            NSString *elemClass = normal.count > 0 ? NSStringFromClass([normal.firstObject class]) : @"空";
+            [diags addObject:[NSString stringWithFormat:@"元素类:%@", elemClass]];
+            BOOL typeOK = [elemClass isEqualToString:@"MMSessionInfo"] || [elemClass isEqualToString:@"SessionInfo"];
+            if (typeOK) {
+                BOOL contains = NO;
+                for (id s in normal) {
+                    if ([s respondsToSelector:@selector(m_nsUserName)] &&
+                        [[s m_nsUserName] isEqualToString:kAITodoChatId]) {
+                        contains = YES;
+                        break;
+                    }
+                }
+                if (!contains) {
+                    NSMutableArray *newNormal = [normal mutableCopy];
+                    [newNormal addObject:session];
+                    [mainMgr setNormalSessions:newNormal];
+                    [diags addObject:@"已追加到 normalSessions"];
+                } else {
+                    [diags addObject:@"已在 normalSessions 中"];
+                }
+            } else {
+                [diags addObject:@"元素类型不匹配，未追加（防崩溃）"];
+            }
+        }
         if ([mainMgr respondsToSelector:@selector(updateMainSessionList)]) {
             [mainMgr updateMainSessionList];
         }
-        return [NSString stringWithFormat:@"✅ 已创建（%@，%@）\n%@",
-                inMemory, contactNote,
-                setContact ? @"若仍不显示，下一步看 MainSessionMgr 数组" : @"联系人未挂上"];
+        [diags addObject:contactNote];
+        return [NSString stringWithFormat:@"✅ 已执行\n%@", [diags componentsJoinedByString:@"；"]];
     } @catch (NSException *e) {
         return [NSString stringWithFormat:@"⚠️ 创建异常：%@", e];
     }
