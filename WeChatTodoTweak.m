@@ -285,6 +285,18 @@ static NSString *createTodoSessionOnMain(void) {
         }
         BOOL reloaded = reloadMainFrameTable();
         [diags addObject:reloaded ? @"已强制刷新聊天列表" : @"未找到主界面表格"];
+        // 用微信原生发送路径触发会话创建：发消息 → 微信自己建会话并刷新列表
+        [WeChatTodoHandler sendReply:@"📋 你好，我是待办事项助手。直接发文字就能记录待办，发“帮助”看全部命令。"
+                              chatId:kAITodoChatId];
+        [diags addObject:@"已发送欢迎消息"];
+        if ([mgr respondsToSelector:@selector(GetSessionByUserName:)]) {
+            id found2 = [mgr GetSessionByUserName:kAITodoChatId];
+            [diags addObject:found2 ? @"发送后会话已入内存" : @"发送后仍未入内存"];
+        }
+        if ([mainMgr respondsToSelector:@selector(updateMainSessionList)]) {
+            [mainMgr updateMainSessionList];
+        }
+        (void)reloadMainFrameTable();
         [diags addObject:contactNote];
         return [NSString stringWithFormat:@"✅ 已执行\n%@", [diags componentsJoinedByString:@"；"]];
     } @catch (NSException *e) {
