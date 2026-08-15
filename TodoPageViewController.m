@@ -20,6 +20,11 @@ static NSString *todoDateString(double ts) {
 @property (nonatomic, strong) UITextField *inputField;
 @property (nonatomic, strong) UIButton *addButton;
 @property (nonatomic, strong) UILabel *emptyLabel;
+@property (nonatomic, strong) UIView *statsCard;
+@property (nonatomic, strong) UILabel *todoCountLabel;
+@property (nonatomic, strong) UILabel *todoTitleLabel;
+@property (nonatomic, strong) UILabel *doneCountLabel;
+@property (nonatomic, strong) UILabel *doneTitleLabel;
 @property (nonatomic, strong) NSMutableArray *filteredTodos;
 @property (nonatomic, assign) CGFloat keyboardInset;
 @end
@@ -33,6 +38,18 @@ static NSString *todoDateString(double ts) {
         TodoPageViewController *vc = [[TodoPageViewController alloc] init];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        if (@available(iOS 13.0, *)) {
+            // 强制浅色外观：避免微信深色模式下顶部变黑，页面更清爽
+            nav.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
+            vc.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
+            UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+            [appearance configureWithOpaqueBackground];
+            appearance.backgroundColor = [UIColor whiteColor];
+            appearance.shadowColor = [UIColor clearColor];
+            nav.navigationBar.standardAppearance = appearance;
+            nav.navigationBar.scrollEdgeAppearance = appearance;
+            nav.navigationBar.compactAppearance = appearance;
+        }
         [host presentViewController:nav animated:YES completion:nil];
     });
 }
@@ -45,7 +62,7 @@ static NSString *todoDateString(double ts) {
     [super viewDidLoad];
     self.title = @"待办事项";
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-    // 内容从导航栏下方开始，避免和标题栏重叠（参考 AI 插件设置页的布局方式）
+    // 内容从导航栏下方开始，避免和标题栏重叠
     self.edgesForExtendedLayout = UIRectEdgeNone;
 
     // 点击空白处收起键盘
@@ -83,6 +100,26 @@ static NSString *todoDateString(double ts) {
                                         action:@selector(syncTapped)];
     self.navigationItem.rightBarButtonItems = @[settingsItem, syncItem];
 
+    // 统计卡片：未完成 / 已完成
+    self.statsCard = [[UIView alloc] initWithFrame:CGRectZero];
+    self.statsCard.backgroundColor = [UIColor whiteColor];
+    self.statsCard.layer.cornerRadius = 14;
+    self.statsCard.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.statsCard.layer.shadowOpacity = 0.05;
+    self.statsCard.layer.shadowOffset = CGSizeMake(0, 2);
+    self.statsCard.layer.shadowRadius = 6;
+    [self.view addSubview:self.statsCard];
+
+    self.todoCountLabel = [self bigNumberLabel];
+    self.todoTitleLabel = [self smallCaptionLabel:@"未完成"];
+    [self.statsCard addSubview:self.todoCountLabel];
+    [self.statsCard addSubview:self.todoTitleLabel];
+
+    self.doneCountLabel = [self bigNumberLabel];
+    self.doneTitleLabel = [self smallCaptionLabel:@"已完成"];
+    [self.statsCard addSubview:self.doneCountLabel];
+    [self.statsCard addSubview:self.doneTitleLabel];
+
     // 分段：待办 / 已完成 / 全部
     self.segmentControl = [[UISegmentedControl alloc] initWithItems:@[@"待办", @"已完成", @"全部"]];
     self.segmentControl.selectedSegmentIndex = 0;
@@ -91,11 +128,12 @@ static NSString *todoDateString(double ts) {
                   forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.segmentControl];
 
-    // 列表
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    // 列表（insetGrouped：圆角卡片行，更像原生待办 App）
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    self.tableView.backgroundColor = [UIColor clearColor];
     [self.view addSubview:self.tableView];
 
     // 空状态
@@ -109,12 +147,16 @@ static NSString *todoDateString(double ts) {
 
     // 底部输入栏
     self.inputBar = [[UIView alloc] initWithFrame:CGRectZero];
-    self.inputBar.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    self.inputBar.backgroundColor = [UIColor whiteColor];
     [self.view addSubview:self.inputBar];
 
     self.inputField = [[UITextField alloc] initWithFrame:CGRectZero];
     self.inputField.placeholder = @"记一条待办…";
-    self.inputField.borderStyle = UITextBorderStyleRoundedRect;
+    self.inputField.font = [UIFont systemFontOfSize:15];
+    self.inputField.backgroundColor = [UIColor systemGray6Color];
+    self.inputField.layer.cornerRadius = 18;
+    self.inputField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 14, 36)];
+    self.inputField.leftViewMode = UITextFieldViewModeAlways;
     self.inputField.returnKeyType = UIReturnKeyDone;
     self.inputField.delegate = self;
     self.inputField.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -122,8 +164,10 @@ static NSString *todoDateString(double ts) {
 
     self.addButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.addButton setTitle:@"添加" forState:UIControlStateNormal];
-    self.addButton.backgroundColor = [UIColor systemGray5Color];
-    self.addButton.layer.cornerRadius = 8;
+    [self.addButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.addButton.titleLabel.font = [UIFont boldSystemFontOfSize:15];
+    self.addButton.backgroundColor = [UIColor systemGreenColor];
+    self.addButton.layer.cornerRadius = 18;
     [self.addButton addTarget:self
                        action:@selector(addTapped)
              forControlEvents:UIControlEventTouchUpInside];
@@ -136,6 +180,23 @@ static NSString *todoDateString(double ts) {
                                                object:nil];
 }
 
+- (UILabel *)bigNumberLabel {
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectZero];
+    l.font = [UIFont boldSystemFontOfSize:26];
+    l.textColor = [UIColor labelColor];
+    l.textAlignment = NSTextAlignmentCenter;
+    return l;
+}
+
+- (UILabel *)smallCaptionLabel:(NSString *)text {
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectZero];
+    l.text = text;
+    l.font = [UIFont systemFontOfSize:12];
+    l.textColor = [UIColor secondaryLabelColor];
+    l.textAlignment = NSTextAlignmentCenter;
+    return l;
+}
+
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadItems];
@@ -146,27 +207,34 @@ static NSString *todoDateString(double ts) {
     CGRect b = self.view.bounds;
     UIEdgeInsets sa = self.view.safeAreaInsets;
 
-    CGFloat segY = sa.top + 10.0;
-    CGFloat segH = 32.0;
-    self.segmentControl.frame = CGRectMake(16, segY, b.size.width - 32, segH);
+    CGFloat cardW = b.size.width - 32;
+    CGFloat cardH = 64;
+    CGFloat cardTop = sa.top + 12;
+    self.statsCard.frame = CGRectMake(16, cardTop, cardW, cardH);
+    CGFloat half = cardW / 2.0;
+    self.todoCountLabel.frame = CGRectMake(0, 12, half, 30);
+    self.todoTitleLabel.frame = CGRectMake(0, 44, half, 16);
+    self.doneCountLabel.frame = CGRectMake(half, 12, half, 30);
+    self.doneTitleLabel.frame = CGRectMake(half, 44, half, 16);
 
-    CGFloat barContentH = 50.0;
+    CGFloat segTop = cardTop + cardH + 12;
+    self.segmentControl.frame = CGRectMake(16, segTop, cardW, 32);
+
+    CGFloat tableTop = segTop + 32 + 12;
+
+    CGFloat barContentH = 54;
     CGFloat barH = barContentH + (self.keyboardInset > 0 ? 0 : sa.bottom);
     CGFloat barBottom = b.size.height - self.keyboardInset;
     self.inputBar.frame = CGRectMake(0, barBottom - barH, b.size.width, barH);
 
-    CGFloat fieldH = 34.0;
-    CGFloat btnW = 60.0;
-    CGFloat btnGap = 8.0;
+    CGFloat fieldH = 36;
+    CGFloat btnW = 64;
     CGFloat fieldY = (barContentH - fieldH) / 2.0;
-    self.inputField.frame = CGRectMake(16, fieldY,
-                                       b.size.width - 32 - btnW - btnGap, fieldH);
-    self.addButton.frame = CGRectMake(b.size.width - 16 - btnW, fieldY,
-                                      btnW, fieldH);
+    self.inputField.frame = CGRectMake(16, fieldY, b.size.width - 32 - btnW - 10, fieldH);
+    self.addButton.frame = CGRectMake(b.size.width - 16 - btnW, fieldY, btnW, fieldH);
 
-    CGFloat tableTop = segY + segH + 8;
     self.tableView.frame = CGRectMake(0, tableTop, b.size.width, barBottom - tableTop);
-    self.emptyLabel.frame = CGRectMake(16, tableTop + 48, b.size.width - 32, 80);
+    self.emptyLabel.frame = CGRectMake(32, tableTop + 60, b.size.width - 64, 90);
 }
 
 #pragma mark - 数据
@@ -191,16 +259,37 @@ static NSString *todoDateString(double ts) {
     self.filteredTodos = filtered;
     [self.tableView reloadData];
 
+    NSUInteger undone = 0, completed = 0;
+    for (NSDictionary *t in all) {
+        if ([t[@"done"] boolValue]) completed++;
+        else undone++;
+    }
+    self.todoCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)undone];
+    self.doneCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)completed];
+    self.todoCountLabel.textColor = undone > 0 ? [UIColor systemGreenColor] : [UIColor systemGray3Color];
+    self.doneCountLabel.textColor = completed > 0 ? [UIColor secondaryLabelColor] : [UIColor systemGray3Color];
+
     BOOL empty = (filtered.count == 0);
     self.tableView.hidden = empty;
     self.emptyLabel.hidden = !empty;
     if (seg == 1) {
-        self.emptyLabel.text = @"还没有已完成的待办";
+        self.emptyLabel.text = @"还没有已完成的待办\n完成一条后会自动出现在这里";
     } else {
         self.emptyLabel.text = @"暂无待办 📋\n在下方输入一条吧";
     }
 
-    NSUInteger undone = [AITodoManager unfinishedCount];
+    // 已完成分组底部放“清空已完成”
+    if (seg == 1 && filtered.count > 0) {
+        UIButton *clearBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        [clearBtn setTitle:@"清空已完成" forState:UIControlStateNormal];
+        [clearBtn setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
+        [clearBtn addTarget:self action:@selector(clearDoneTapped) forControlEvents:UIControlEventTouchUpInside];
+        clearBtn.frame = CGRectMake(0, 0, 0, 44);
+        self.tableView.tableFooterView = clearBtn;
+    } else {
+        self.tableView.tableFooterView = nil;
+    }
+
     self.title = undone > 0 ? [NSString stringWithFormat:@"待办（%lu）", (unsigned long)undone]
                             : @"待办事项";
 }
@@ -238,7 +327,7 @@ static NSString *todoDateString(double ts) {
     }
 
     double created = [t[@"created"] doubleValue];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"#%@  %@",
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"#%@ · %@",
                                  t[@"id"], todoDateString(created)];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
@@ -249,7 +338,7 @@ static NSString *todoDateString(double ts) {
         img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     }
     cell.imageView.image = img;
-    cell.imageView.tintColor = done ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
+    cell.imageView.tintColor = done ? [UIColor systemGreenColor] : [UIColor systemGray3Color];
     return cell;
 }
 
@@ -293,6 +382,20 @@ static NSString *todoDateString(double ts) {
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
     [self addTapped];
     return YES;
+}
+
+- (void)clearDoneTapped {
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"清空已完成"
+                                                                     message:@"确定删除所有已完成的待办吗？"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"清空"
+                                                style:UIAlertActionStyleDestructive
+                                              handler:^(UIAlertAction *action) {
+        [AITodoManager clearDone];
+        [self reloadItems];
+    }]];
+    [self presentViewController:confirm animated:YES completion:nil];
 }
 
 - (void)syncTapped {

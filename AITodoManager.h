@@ -8,6 +8,7 @@
 + (NSString *)addTodo:(NSString *)content;     // 新增，返回确认文本
 + (NSString *)markTodo:(NSInteger)todoId done:(BOOL)done;
 + (NSString *)deleteTodo:(NSInteger)todoId;
++ (NSString *)clearDone;                      // 清空所有已完成，返回提示文本
 + (NSString *)syncToMemosNow;                  // 同步，返回结果文本
 
 @end
