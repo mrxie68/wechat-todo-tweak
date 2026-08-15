@@ -32,6 +32,11 @@
 - (id)getSelfContact;
 @end
 
+// 声明属性是为了让编译器认识 m_nsUsrName selector（ARC 下 id 收件人必须能推断返回类型）
+@interface CContact : NSObject
+@property (nonatomic, retain) NSString *m_nsUsrName;
+@end
+
 @interface SettingUtil : NSObject
 + (NSString *)getCurUsrName;
 @end
