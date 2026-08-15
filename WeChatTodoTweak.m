@@ -74,6 +74,59 @@ static NSArray *aiFindDatabaseFiles(void);
 static NSArray *aiSQLiteTableNames(sqlite3 *db);
 static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
 
+// 用微信原生接口（MMNewSessionMgr AddOrModifySession:）创建待办会话，列表自动刷新
+static NSString *createTodoSessionViaManager(void) {
+    Class mgrCls = NSClassFromString(@"MMNewSessionMgr");
+    if (!mgrCls) return @"MMNewSessionMgr 类不存在";
+    Class centerCls = NSClassFromString(@"MMServiceCenter");
+    id center = centerCls ? [(id)centerCls defaultCenter] : nil;
+    if (!center) return @"MMServiceCenter 不可用";
+    id mgr = [center getService:mgrCls];
+    if (!mgr) return @"拿不到 MMNewSessionMgr 服务";
+    if (![mgr respondsToSelector:@selector(AddOrModifySession:withNotifyFlag:immediateRefresh:)]) {
+        return @"MMNewSessionMgr 无 AddOrModifySession:withNotifyFlag:immediateRefresh:";
+    }
+    Class infoCls = NSClassFromString(@"MMSessionInfo");
+    if (!infoCls) return @"MMSessionInfo 类不存在";
+    id session = [[infoCls alloc] init];
+    if (!session) return @"MMSessionInfo 初始化失败";
+    NSMutableArray *props = [NSMutableArray array];
+    unsigned int pc = 0;
+    objc_property_t *plist = class_copyPropertyList(infoCls, &pc);
+    for (unsigned int i = 0; i < pc; i++) {
+        const char *pn = property_getName(plist[i]);
+        if (pn) [props addObject:[NSString stringWithUTF8String:pn]];
+    }
+    free(plist);
+    @try {
+        BOOL setUser = NO;
+        for (NSString *k in @[@"m_userName", @"userName", @"m_nsUsrName", @"sessionId"]) {
+            if ([props containsObject:k]) {
+                [session setValue:kAITodoChatId forKey:k];
+                setUser = YES;
+                break;
+            }
+        }
+        BOOL setNick = NO;
+        for (NSString *k in @[@"m_nsNickName", @"nickName", @"NickName"]) {
+            if ([props containsObject:k]) {
+                [session setValue:kAITodoNickName forKey:k];
+                setNick = YES;
+                break;
+            }
+        }
+        if (!setUser) {
+            return [NSString stringWithFormat:@"MMSessionInfo 无用户名属性（已有：%@）",
+                    [props componentsJoinedByString:@","]];
+        }
+        [mgr AddOrModifySession:session withNotifyFlag:YES immediateRefresh:YES];
+        return [NSString stringWithFormat:@"✅ 已通过微信接口创建待办联系人（userName%@ / nick%@）",
+                setUser ? @"✓" : @"✗", setNick ? @"✓" : @"✗"];
+    } @catch (NSException *e) {
+        return [NSString stringWithFormat:@"⚠️ 创建异常：%@", e];
+    }
+}
+
 #pragma mark - 基础工具
 
 static CMessageMgr *wechatMessageMgr(void) {
@@ -310,6 +363,13 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 }
 
 + (NSString *)createTodoSessionDiagnostic {
+    // 优先走微信原生接口（内存创建，列表自动刷新）
+    NSString *managerResult = createTodoSessionViaManager();
+    if ([managerResult hasPrefix:@"✅"]) {
+        return [managerResult stringByAppendingString:
+                @"\n（优先使用微信原生接口，不再写数据库）"];
+    }
+    // 原生接口失败才退回数据库兜底
     NSString *selfUsr = wechatSelfUsrName();
     NSString *md5 = selfUsr.length > 0 ? aiMD5Hex(selfUsr) : @"";
     NSMutableArray *notes = [NSMutableArray array];
@@ -372,6 +432,7 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     if (!contactWritten) {
         [notes addObject:@"未找到可写的联系人表（需 UserName+NickName 列）"];
     }
+    [notes insertObject:[@"接口尝试：" stringByAppendingString:managerResult] atIndex:0];
 
     // 第二步：写会话行
     for (NSDictionary *d in dbs) {
@@ -436,6 +497,21 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     NSString *selfUsr = wechatSelfUsrName();
     NSString *md5 = selfUsr.length > 0 ? aiMD5Hex(selfUsr) : @"";
     NSMutableArray *notes = [NSMutableArray array];
+    // 先用微信接口删除内存会话
+    Class mgrCls = NSClassFromString(@"MMNewSessionMgr");
+    Class centerCls = NSClassFromString(@"MMServiceCenter");
+    id center = centerCls ? [(id)centerCls defaultCenter] : nil;
+    id mgr = center ? [center getService:mgrCls] : nil;
+    if (mgr && [mgr respondsToSelector:@selector(DeleteSessionOfUser:)]) {
+        @try {
+            [mgr DeleteSessionOfUser:kAITodoChatId];
+            [notes addObject:@"已通过微信接口删除内存会话"];
+        } @catch (NSException *e) {
+            [notes addObject:[NSString stringWithFormat:@"接口删除异常：%@", e]];
+        }
+    } else {
+        [notes addObject:@"MMNewSessionMgr 无 DeleteSessionOfUser:"];
+    }
     NSArray *dbs = aiFindDatabaseFiles();
     // 清理联系人
     for (NSDictionary *d in dbs) {
