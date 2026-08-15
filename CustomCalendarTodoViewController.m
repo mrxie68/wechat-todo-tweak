@@ -43,7 +43,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     CGFloat w = self.contentView.bounds.size.width;
     _weekLabel.frame = CGRectMake(0, 12, w, 14);
     _dayLabel.frame = CGRectMake(0, 32, w, 24);
-    _dotView.frame = CGRectMake((w - 4) / 2.0, 64, 4, 4);
+    _dotView.frame = CGRectMake((w - 4) / 2.0, 60, 4, 4);
 }
 
 - (void)setDay:(NSDate *)day selected:(BOOL)selected isToday:(BOOL)isToday hasTodos:(BOOL)hasTodos {
@@ -87,12 +87,15 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 @property (nonatomic, strong) NSMutableArray<NSDate *> *days;
 @property (nonatomic, strong) UIView *topBar;
 @property (nonatomic, strong) UIButton *closeButton;
-@property (nonatomic, strong) UIButton *statsButton;
 @property (nonatomic, strong) UIButton *addButton;
 @property (nonatomic, strong) UIButton *prevMonthButton;
 @property (nonatomic, strong) UIButton *nextMonthButton;
 @property (nonatomic, strong) UILabel *monthLabel;
+@property (nonatomic, strong) UIView *calendarCard;
 @property (nonatomic, strong) UICollectionView *calendarView;
+@property (nonatomic, strong) UIButton *bookmarkButton;
+@property (nonatomic, strong) UIButton *statsButton;
+@property (nonatomic, assign) BOOL bookmarkMode;
 @property (nonatomic, strong) UILabel *listHeaderLabel;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UILabel *emptyLabel;
@@ -125,8 +128,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     self.expandedIds = [NSMutableSet set];
 
     [self buildTopBar];
-    [self buildMonthRow];
-    [self buildCalendar];
+    [self buildCalendarCard];
     [self buildList];
     [self rebuildDays];
     [self refreshDaysWithTodos];
@@ -154,10 +156,6 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     [self.closeButton addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.topBar addSubview:self.closeButton];
 
-    self.statsButton = [self topBarButton:@"chart.pie.fill"];
-    [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.topBar addSubview:self.statsButton];
-
     UILabel *title = [[UILabel alloc] initWithFrame:CGRectZero];
     title.text = @"待办";
     title.font = [UIFont boldSystemFontOfSize:17];
@@ -178,29 +176,36 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     return b;
 }
 
-#pragma mark - 月份选择 + 日历
+#pragma mark - 日历卡片（月份切换 + 日期条 + 书签/统计，一个白色容器）
 
-- (void)buildMonthRow {
+- (void)buildCalendarCard {
+    self.calendarCard = [[UIView alloc] initWithFrame:CGRectZero];
+    self.calendarCard.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    self.calendarCard.layer.cornerRadius = 16;
+    self.calendarCard.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.calendarCard.layer.shadowOpacity = 0.05;
+    self.calendarCard.layer.shadowOffset = CGSizeMake(0, 2);
+    self.calendarCard.layer.shadowRadius = 8;
+    [self.view addSubview:self.calendarCard];
+
     self.prevMonthButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.prevMonthButton setImage:[UIImage systemImageNamed:@"chevron.left"] forState:UIControlStateNormal];
     [self.prevMonthButton addTarget:self action:@selector(prevMonth) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.prevMonthButton];
+    [self.calendarCard addSubview:self.prevMonthButton];
 
     self.monthLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.monthLabel.font = [UIFont boldSystemFontOfSize:16];
     self.monthLabel.textAlignment = NSTextAlignmentCenter;
-    [self.view addSubview:self.monthLabel];
+    [self.calendarCard addSubview:self.monthLabel];
 
     self.nextMonthButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.nextMonthButton setImage:[UIImage systemImageNamed:@"chevron.right"] forState:UIControlStateNormal];
     [self.nextMonthButton addTarget:self action:@selector(nextMonth) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.nextMonthButton];
-}
+    [self.calendarCard addSubview:self.nextMonthButton];
 
-- (void)buildCalendar {
     UICollectionViewFlowLayout *layout = [[UICollectionViewFlowLayout alloc] init];
     layout.scrollDirection = UICollectionViewScrollDirectionHorizontal;
-    layout.itemSize = CGSizeMake(52, 82);
+    layout.itemSize = CGSizeMake(52, 78);
     layout.minimumLineSpacing = 10;
     layout.minimumInteritemSpacing = 10;
     layout.sectionInset = UIEdgeInsetsMake(0, 16, 0, 16);
@@ -210,7 +215,20 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     self.calendarView.dataSource = self;
     self.calendarView.delegate = self;
     [self.calendarView registerClass:[CalendarDayCell class] forCellWithReuseIdentifier:@"DayCell"];
-    [self.view addSubview:self.calendarView];
+    [self.calendarCard addSubview:self.calendarView];
+
+    // 底部行：全部书签（筛选视图）+ 统计
+    self.bookmarkButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.bookmarkButton setTitle:@"🔖 全部书签" forState:UIControlStateNormal];
+    self.bookmarkButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.bookmarkButton addTarget:self action:@selector(toggleBookmarkMode) forControlEvents:UIControlEventTouchUpInside];
+    [self.calendarCard addSubview:self.bookmarkButton];
+
+    self.statsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.statsButton setTitle:@"统计" forState:UIControlStateNormal];
+    self.statsButton.titleLabel.font = [UIFont systemFontOfSize:13];
+    [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.calendarCard addSubview:self.statsButton];
 }
 
 - (void)rebuildDays {
@@ -327,28 +345,59 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 }
 
 - (void)reloadList {
-    self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
+    if (self.bookmarkMode) {
+        // 全部书签视图：跨日期汇总
+        NSMutableArray *arr = [NSMutableArray array];
+        for (MainTodoItem *m in [AITodoManager allTodos]) {
+            if (m.isBookmarked) [arr addObject:m];
+        }
+        [arr sortUsingComparator:^NSComparisonResult(MainTodoItem *a, MainTodoItem *b) {
+            return [a.createTime compare:b.createTime];
+        }];
+        self.listTodos = arr;
+        self.listHeaderLabel.text = [NSString stringWithFormat:@"全部书签（%lu）",
+                                     (unsigned long)arr.count];
+    } else {
+        self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
+        NSCalendar *cal = [NSCalendar currentCalendar];
+        BOOL isToday = [[cal startOfDayForDate:self.selectedDay] isEqualToDate:
+                        [cal startOfDayForDate:[NSDate date]]];
+        if (isToday) {
+            self.listHeaderLabel.text = [NSString stringWithFormat:@"今日待办（%lu）",
+                                         (unsigned long)self.listTodos.count];
+        } else {
+            NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+            fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+            fmt.dateFormat = @"M月d日";
+            self.listHeaderLabel.text = [NSString stringWithFormat:@"%@ 待办（%lu）",
+                                         [fmt stringFromDate:self.selectedDay],
+                                         (unsigned long)self.listTodos.count];
+        }
+    }
     [self.tableView reloadData];
     [self refreshDaysWithTodos];
 
-    NSCalendar *cal = [NSCalendar currentCalendar];
-    BOOL isToday = [[cal startOfDayForDate:self.selectedDay] isEqualToDate:
-                    [cal startOfDayForDate:[NSDate date]]];
-    if (isToday) {
-        self.listHeaderLabel.text = [NSString stringWithFormat:@"今日待办（%lu）",
-                                     (unsigned long)self.listTodos.count];
-    } else {
-        NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-        fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
-        fmt.dateFormat = @"M月d日";
-        self.listHeaderLabel.text = [NSString stringWithFormat:@"%@ 待办（%lu）",
-                                     [fmt stringFromDate:self.selectedDay],
-                                     (unsigned long)self.listTodos.count];
+    // 书签按钮计数
+    NSUInteger bookmarked = 0;
+    for (MainTodoItem *m in [AITodoManager allTodos]) {
+        if (m.isBookmarked) bookmarked++;
     }
+    [self.bookmarkButton setTitle:[NSString stringWithFormat:@"🔖 全部书签（%lu）",
+                                   (unsigned long)bookmarked]
+                         forState:UIControlStateNormal];
+    self.bookmarkButton.tintColor = self.bookmarkMode ? kAITodoAccentColor : [UIColor labelColor];
+
     BOOL empty = (self.listTodos.count == 0);
     self.tableView.hidden = empty;
     self.emptyLabel.hidden = !empty;
-    self.emptyLabel.text = @"这一天还没有待办\n点右上角 + 添加一条";
+    self.emptyLabel.text = self.bookmarkMode
+        ? @"还没有书签\n点卡片上的书签图标即可收藏"
+        : @"这一天还没有待办\n点右上角 + 添加一条";
+}
+
+- (void)toggleBookmarkMode {
+    self.bookmarkMode = !self.bookmarkMode;
+    [self reloadList];
 }
 
 - (void)refreshDaysWithTodos {
@@ -478,8 +527,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 // 刷新列表：操作后从磁盘重新读取最新数据，避免用旧对象刷新导致改动不显示
 - (void)reloadRowForTodo:(MainTodoItem *)todo {
     (void)todo;
-    self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
-    [self.tableView reloadData];
+    [self reloadList];
 }
 
 - (void)editTitleForTodo:(MainTodoItem *)todo {
@@ -552,6 +600,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     self.selectedDay = self.days[indexPath.row];
     self.currentMonth = self.selectedDay;
+    self.bookmarkMode = NO; // 点日期回到按天视图
     [self saveSelectedDay];
     [self.calendarView reloadData];
     [self updateMonthLabel];
@@ -629,26 +678,30 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     UIEdgeInsets sa = self.view.safeAreaInsets;
     CGFloat w = b.size.width;
 
+    // 顶栏：只留关闭 + 添加
     self.topBar.frame = CGRectMake(0, 0, w, sa.top + 48);
     self.closeButton.frame = CGRectMake(8, sa.top, 44, 44);
-    self.statsButton.frame = CGRectMake(52, sa.top, 44, 44);
     self.addButton.frame = CGRectMake(w - 52, sa.top, 44, 44);
     UILabel *title = [self.topBar viewWithTag:101];
     title.frame = CGRectMake(100, sa.top, w - 200, 44);
 
-    CGFloat monthY = sa.top + 48 + 10;
-    self.prevMonthButton.frame = CGRectMake(16, monthY, 44, 34);
-    self.nextMonthButton.frame = CGRectMake(w - 60, monthY, 44, 34);
-    self.monthLabel.frame = CGRectMake(64, monthY, w - 128, 34);
-
-    CGFloat calY = monthY + 34 + 10;
-    self.calendarView.frame = CGRectMake(0, calY, w, 84);
+    // 白色日历卡片：月份行 + 日期条 + 底部行（书签/统计）
+    CGFloat cardX = 16, cardW = w - 32;
+    CGFloat cardY = sa.top + 48 + 10;
+    CGFloat cardH = 12 + 32 + 8 + 78 + 8 + 32 + 12; // 182
+    self.calendarCard.frame = CGRectMake(cardX, cardY, cardW, cardH);
+    self.prevMonthButton.frame = CGRectMake(12, 12, 40, 32);
+    self.nextMonthButton.frame = CGRectMake(cardW - 52, 12, 40, 32);
+    self.monthLabel.frame = CGRectMake(56, 12, cardW - 112, 32);
+    self.calendarView.frame = CGRectMake(0, 52, cardW, 78);
     if (!self.didInitialScroll) {
         self.didInitialScroll = YES;
         [self scrollToSelectedDayAnimated:NO]; // 首次布局后再定位到今天，保证可见
     }
+    self.bookmarkButton.frame = CGRectMake(12, 138, 180, 32);
+    self.statsButton.frame = CGRectMake(cardW - 12 - 70, 138, 70, 32);
 
-    CGFloat headerY = calY + 84 + 12;
+    CGFloat headerY = cardY + cardH + 12;
     self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 40, 24);
 
     CGFloat tableY = headerY + 24 + 4;
