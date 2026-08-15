@@ -1,15 +1,8 @@
 #import "TodoSettingsViewController.h"
 #import "AISettings.h"
 #import "AITodoManager.h"
+#import "TodoPageViewController.h"
 #import "AIConfig.h"
-
-// 由 WeChatTodoTweak 提供（同一个 dylib 内）
-@interface WeChatTodoHandler : NSObject
-+ (NSString *)todoSessionDiagnostic;
-+ (NSString *)createTodoSessionDiagnostic;
-+ (NSString *)removeTodoSessionDiagnostic;
-+ (NSString *)uiProbeDiagnostic;
-@end
 
 @interface TodoSettingsViewController () <UITextFieldDelegate>
 @property (nonatomic, strong) UIScrollView *scrollView;
@@ -17,28 +10,11 @@
 @property (nonatomic, strong) UITextField *urlField;
 @property (nonatomic, strong) UITextField *tokenField;
 @property (nonatomic, strong) UISegmentedControl *visibilityControl;
-@property (nonatomic, strong) UILabel *sessionStatusLabel;
 @end
 
-@implementation TodoSettingsViewController
+static void todoAlert(NSString *msg); // 前向声明
 
-// 诊断结果：完整内容复制剪贴板，弹窗只显示摘要；2 分钟后自动清空剪贴板（用完即销毁）
-- (NSString *)consumeDiagnostic:(NSString *)full {
-    [[UIPasteboard generalPasteboard] setString:full];
-    NSString *copied = [full copy];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        // 只有剪贴板还是这份内容时才清空，避免误删用户之后复制的东西
-        if ([[[UIPasteboard generalPasteboard] string] isEqualToString:copied]) {
-            [[UIPasteboard generalPasteboard] setString:@""];
-        }
-    });
-    if (full.length > 180) {
-        return [[full substringToIndex:180] stringByAppendingString:
-                @"\n…（完整已复制到剪贴板，2 分钟后自动清除）"];
-    }
-    return full;
-}
+@implementation TodoSettingsViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -64,12 +40,19 @@
 
     // 使用说明
     UILabel *intro = [[UILabel alloc] initWithFrame:CGRectMake(x, y, cardW, 60)];
-    intro.text = @"在微信聊天列表的“待办事项”对话里发消息即可记录。\n命令：待办 / 完成 1 / 取消 1 / 删除 1 / 历史 / 同步 / 帮助";
+    intro.text = @"在微信主界面底部向上滑动，即可打开待办页。\n像普通待办 App 一样：添加、勾选、删除、同步。";
     intro.numberOfLines = 0;
     intro.font = [UIFont systemFontOfSize:13];
     intro.textColor = [UIColor secondaryLabelColor];
     [self.contentView addSubview:intro];
     y += 60 + 12;
+
+    // 打开待办页
+    UIButton *openBtn = [self makeButton:@"📋 打开待办页"];
+    openBtn.frame = CGRectMake(x, y, cardW, 44);
+    [openBtn addTarget:self action:@selector(openTodoTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:openBtn];
+    y += 44 + 12;
 
     // Memos 配置
     UIView *card = [[UIView alloc] initWithFrame:CGRectMake(x, y, cardW, 170)];
@@ -87,6 +70,7 @@
     self.urlField.borderStyle = UITextBorderStyleRoundedRect;
     self.urlField.text = [AISettings memosURL];
     self.urlField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.urlField.delegate = self;
     [card addSubview:self.urlField];
 
     UILabel *tokenLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 52, 90, 30)];
@@ -127,50 +111,10 @@
     [self.contentView addSubview:syncBtn];
     y += 44 + 8;
 
-    UIButton *openBtn = [self makeButton:@"🌐 打开 Memos 网页"];
-    openBtn.frame = CGRectMake(x, y, cardW, 44);
-    [openBtn addTarget:self action:@selector(openTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:openBtn];
-    y += 44 + 12;
-
-    // 待办联系人
-    UIView *sessionCard = [[UIView alloc] initWithFrame:CGRectMake(x, y, cardW, 110)];
-    sessionCard.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    sessionCard.layer.cornerRadius = 12;
-    [self.contentView addSubview:sessionCard];
-    UILabel *sessLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, cardW - 32, 20)];
-    sessLabel.text = @"待办联系人";
-    sessLabel.font = [UIFont systemFontOfSize:15];
-    [sessionCard addSubview:sessLabel];
-    self.sessionStatusLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 38, cardW - 32, 40)];
-    self.sessionStatusLabel.text = @"未检查";
-    self.sessionStatusLabel.numberOfLines = 2;
-    self.sessionStatusLabel.font = [UIFont systemFontOfSize:12];
-    self.sessionStatusLabel.textColor = [UIColor secondaryLabelColor];
-    [sessionCard addSubview:self.sessionStatusLabel];
-    UIButton *createBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    createBtn.frame = CGRectMake(16, 76, cardW - 32, 28);
-    [createBtn setTitle:@"检查待办联系人（只读探测）" forState:UIControlStateNormal];
-    [createBtn addTarget:self action:@selector(checkSessionTapped) forControlEvents:UIControlEventTouchUpInside];
-    [sessionCard addSubview:createBtn];
-    y += 110 + 12;
-
-    UIButton *writeBtn = [self makeButton:@"✍️ 创建待办联系人（写入会话表）"];
-    writeBtn.frame = CGRectMake(x, y, cardW, 44);
-    [writeBtn addTarget:self action:@selector(createSessionTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:writeBtn];
-    y += 44 + 8;
-
-    UIButton *removeWriteBtn = [self makeButton:@"🗑 移除待办联系人（清理写入）"];
-    removeWriteBtn.frame = CGRectMake(x, y, cardW, 44);
-    [removeWriteBtn addTarget:self action:@selector(removeSessionTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:removeWriteBtn];
-    y += 44 + 12;
-
-    UIButton *uiProbeBtn = [self makeButton:@"🔍 UI 插行探测（只读）"];
-    uiProbeBtn.frame = CGRectMake(x, y, cardW, 44);
-    [uiProbeBtn addTarget:self action:@selector(uiProbeTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:uiProbeBtn];
+    UIButton *webBtn = [self makeButton:@"🌐 打开 Memos 网页"];
+    webBtn.frame = CGRectMake(x, y, cardW, 44);
+    [webBtn addTarget:self action:@selector(openTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:webBtn];
     y += 44 + 12;
 
     UILabel *versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, y, w, 24)];
@@ -183,8 +127,6 @@
 
     self.contentView.frame = CGRectMake(0, 0, w, y);
     self.scrollView.contentSize = CGSizeMake(w, y);
-
-    [self refreshSessionStatus];
 }
 
 - (UIButton *)makeButton:(NSString *)title {
@@ -195,14 +137,9 @@
     return btn;
 }
 
-- (void)refreshSessionStatus {
-    self.sessionStatusLabel.text = @"正在探测…";
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.sessionStatusLabel.text = [self consumeDiagnostic:diag];
-        });
-    });
+- (void)openTodoTapped {
+    [self.view endEditing:YES];
+    [TodoPageViewController presentFrom:self];
 }
 
 - (void)saveTapped {
@@ -243,12 +180,12 @@
 - (void)openTapped {
     NSString *url = [AISettings memosURL];
     if (url.length == 0) {
-        WeChatTodoHandler_todoAlert(@"还没配置 Memos 地址");
+        todoAlert(@"还没配置 Memos 地址");
         return;
     }
     NSURL *u = [NSURL URLWithString:url];
     if (!u) {
-        WeChatTodoHandler_todoAlert(@"Memos 地址格式不对");
+        todoAlert(@"Memos 地址格式不对");
         return;
     }
     if (@available(iOS 10.0, *)) {
@@ -258,98 +195,7 @@
     }
 }
 
-- (void)checkSessionTapped {
-    [self.view endEditing:YES];
-    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"正在探测"
-                                                                     message:@"正在只读扫描会话库…\n\n"
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:progress animated:YES completion:nil];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *shortText = [self consumeDiagnostic:diag];
-            self.sessionStatusLabel.text = shortText;
-            [progress dismissViewControllerAnimated:NO completion:^{
-                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"待办联系人"
-                                                                           message:shortText
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:r animated:YES completion:nil];
-            }];
-        });
-    });
-}
-
-- (void)createSessionTapped {
-    [self.view endEditing:YES];
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"创建待办联系人"
-                                                                     message:@"将往微信会话表写入一行待办联系人（sessionId=todo@local）。\n写入微信数据有极小风险，如出现异常请立刻移除。确定写入？"
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"写入"
-                                                style:UIAlertActionStyleDestructive
-                                              handler:^(UIAlertAction *action) {
-        [self runTodoWrite:^{ return [WeChatTodoHandler createTodoSessionDiagnostic]; }];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
-}
-
-- (void)removeSessionTapped {
-    [self.view endEditing:YES];
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"移除待办联系人"
-                                                                     message:@"将从会话表删除待办联系人（sessionId=todo@local）的写入。确定移除？"
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"移除"
-                                                style:UIAlertActionStyleDestructive
-                                              handler:^(UIAlertAction *action) {
-        [self runTodoWrite:^{ return [WeChatTodoHandler removeTodoSessionDiagnostic]; }];
-    }]];
-    [self presentViewController:confirm animated:YES completion:nil];
-}
-
-- (void)runTodoWrite:(NSString *(^)(void))block {
-    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"请稍候"
-                                                                     message:@"正在操作会话表…\n\n"
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:progress animated:YES completion:nil];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *diag = block();
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *shortText = [self consumeDiagnostic:diag];
-            [progress dismissViewControllerAnimated:NO completion:^{
-                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"结果"
-                                                                           message:shortText
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:r animated:YES completion:nil];
-            }];
-        });
-    });
-}
-
-- (void)uiProbeTapped {
-    [self.view endEditing:YES];
-    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"正在探测"
-                                                                     message:@"正在读取微信界面类信息…\n\n"
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:progress animated:YES completion:nil];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *diag = [WeChatTodoHandler uiProbeDiagnostic];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *shortText = [self consumeDiagnostic:diag];
-            [progress dismissViewControllerAnimated:NO completion:^{
-                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"UI 探测结果"
-                                                                           message:shortText
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:r animated:YES completion:nil];
-            }];
-        });
-    });
-}
-
-static void WeChatTodoHandler_todoAlert(NSString *msg) {
+static void todoAlert(NSString *msg) {
     UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
     while (top.presentedViewController) top = top.presentedViewController;
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"提示"

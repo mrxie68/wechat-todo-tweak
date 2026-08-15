@@ -35,58 +35,6 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
     return n;
 }
 
-+ (NSString *)usageText {
-    return @"📋 待办事项用法：\n直接发文字 = 记一条待办\n“待办/列表” = 查看未完成\n“完成 1” = 勾选完成\n“取消 1” = 标回未完成\n“删除 1” = 删除\n“历史” = 查看全部\n“同步” = 同步到 Memos\n“帮助” = 显示这个";
-}
-
-// 解析“完成/取消/删除 数字”
-+ (BOOL)parseNumberAfter:(NSString *)prefix inText:(NSString *)text value:(NSInteger *)value {
-    if (text.length <= prefix.length) return NO;
-    if (![text hasPrefix:prefix]) return NO;
-    NSString *tail = [text substringFromIndex:prefix.length];
-    tail = [tail stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (tail.length == 0) return NO;
-    NSInteger v = 0;
-    BOOL any = NO;
-    for (NSUInteger i = 0; i < tail.length; i++) {
-        unichar ch = [tail characterAtIndex:i];
-        if (ch >= '0' && ch <= '9') {
-            v = v * 10 + (ch - '0');
-            any = YES;
-        } else {
-            break;
-        }
-    }
-    if (any && value) *value = v;
-    return any;
-}
-
-+ (NSString *)listText {
-    NSMutableArray *list = [self loadTodos];
-    NSMutableArray *unfinished = [NSMutableArray array];
-    for (NSDictionary *t in list) {
-        if (![t[@"done"] boolValue]) [unfinished addObject:t];
-    }
-    if (unfinished.count == 0) return @"📋 暂无待办，直接发文字就能记一条。";
-    NSMutableString *s = [NSMutableString stringWithFormat:@"📋 待办（%lu 条未完成）", (unsigned long)unfinished.count];
-    for (NSDictionary *t in unfinished) {
-        [s appendFormat:@"\n%@. %@", t[@"id"], t[@"content"]];
-    }
-    return s;
-}
-
-+ (NSString *)historyText {
-    NSArray *list = [self loadTodos];
-    if (list.count == 0) return @"还没有任何待办记录。";
-    NSMutableString *s = [NSMutableString stringWithFormat:@"🗂 全部记录（%lu 条）", (unsigned long)list.count];
-    for (NSDictionary *t in list) {
-        BOOL done = [t[@"done"] boolValue];
-        [s appendFormat:@"\n%@ %@. %@%@", done ? @"✅" : @"⬜", t[@"id"], t[@"content"],
-         done ? @"（已完成）" : @""];
-    }
-    return s;
-}
-
 + (NSString *)addTodo:(NSString *)content {
     NSMutableArray *list = [self loadTodos];
     NSInteger nextId = 1;
@@ -104,8 +52,7 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
     [self saveTodos:list];
     // 同步到 Memos（后台异步、尽力而为，失败不影响本地）
     [self syncToMemosAsync];
-    return [NSString stringWithFormat:@"✅ 已记录 #%ld：%@\n（回复“待办”可查看，发“帮助”看全部命令）",
-            (long)nextId, content];
+    return [NSString stringWithFormat:@"✅ 已记录 #%ld：%@", (long)nextId, content];
 }
 
 + (NSString *)markTodo:(NSInteger)todoId done:(BOOL)done {
@@ -138,66 +85,6 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
     return [NSString stringWithFormat:@"⚠️ 没有找到 #%ld", (long)todoId];
 }
 
-+ (NSString *)clearDone {
-    NSMutableArray *list = [self loadTodos];
-    NSMutableArray *kept = [NSMutableArray array];
-    NSUInteger removed = 0;
-    for (NSDictionary *t in list) {
-        if ([t[@"done"] boolValue]) {
-            removed++;
-        } else {
-            [kept addObject:t];
-        }
-    }
-    [self saveTodos:kept];
-    return removed > 0
-        ? [NSString stringWithFormat:@"🧹 已清空 %lu 条已完成记录", (unsigned long)removed]
-        : @"没有已完成的记录可清空。";
-}
-
-+ (NSString *)handleCommand:(NSString *)text {
-    NSString *t = [text stringByTrimmingCharactersInSet:
-                   [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (t.length == 0) return [self usageText];
-    NSString *lower = [t lowercaseString];
-
-    if ([t isEqualToString:@"帮助"] || [t isEqualToString:@"?"] ||
-        [lower isEqualToString:@"help"]) {
-        return [self usageText];
-    }
-    if ([t isEqualToString:@"待办"] || [t isEqualToString:@"列表"] ||
-        [lower isEqualToString:@"list"]) {
-        return [self listText];
-    }
-    if ([t isEqualToString:@"历史"] || [t isEqualToString:@"全部"] ||
-        [lower isEqualToString:@"history"]) {
-        return [self historyText];
-    }
-    if ([t isEqualToString:@"清空"] || [t isEqualToString:@"清空已完成"]) {
-        return [self clearDone];
-    }
-    if ([t isEqualToString:@"同步"] || [lower isEqualToString:@"sync"]) {
-        return [self syncToMemosNow];
-    }
-
-    NSInteger num = 0;
-    if ([self parseNumberAfter:@"完成" inText:t value:&num] && num > 0) {
-        return [self markTodo:num done:YES];
-    }
-    if ([self parseNumberAfter:@"取消" inText:t value:&num] && num > 0) {
-        return [self markTodo:num done:NO];
-    }
-    if ([self parseNumberAfter:@"删除" inText:t value:&num] && num > 0) {
-        return [self deleteTodo:num];
-    }
-
-    // 其余都当作新增
-    if (t.length >= 2) {
-        return [self addTodo:t];
-    }
-    return [self usageText];
-}
-
 // ===== Memos 同步（尽力而为：失败不影响本地） =====
 
 + (NSString *)memosBaseURL {
@@ -208,7 +95,7 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
     return url;
 }
 
-// 后台异步同步（聊天流程里调用，不阻塞主线程）
+// 后台异步同步（新增/完成时调用，不阻塞 UI）
 + (void)syncToMemosAsync {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         NSString *result = [self syncToMemosNow];
@@ -220,10 +107,10 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
     NSString *base = [self memosBaseURL];
     NSString *token = [AISettings memosToken];
     if (base.length == 0) {
-        return @"⚠️ 还没配置 Memos 地址：设置页 → 待办事项 → Memos 地址。";
+        return @"⚠️ 还没配置 Memos 地址：设置 → Memos 地址。";
     }
     if (token.length == 0) {
-        return @"⚠️ 还没配置 Access Token：设置页 → 待办事项 → Token。";
+        return @"⚠️ 还没配置 Access Token：设置 → Token。";
     }
 
     NSMutableArray *list = [self loadTodos];
