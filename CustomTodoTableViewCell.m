@@ -247,8 +247,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     _headerBar.frame = CGRectMake(0, 0, cardW, headerH);
     UIView *hairline = [_cardView viewWithTag:3];
     hairline.frame = CGRectMake(0, headerH - 0.5, cardW, 0.5);
-    _timeLabel.frame = CGRectMake(0, 0, cardW - 34, headerH);
-    _bookmarkButton.frame = CGRectMake(cardW - 30, (headerH - 26) / 2.0, 26, 26);
+    _timeLabel.frame = CGRectMake(0, 0, cardW, headerH);
 
     CGFloat iconSize = 34;
     _iconBg.frame = CGRectMake(12, headerH + (mainH - iconSize) / 2.0, iconSize, iconSize);
@@ -256,7 +255,8 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 
     CGFloat rightX = cardW - 12;
     _plusButton.frame = CGRectMake(rightX - 38, headerH + (mainH - 38) / 2.0, 38, 38);
-    _titleLabel.frame = CGRectMake(56, headerH + 6, cardW - 56 - 50, mainH - 12);
+    _bookmarkButton.frame = CGRectMake(rightX - 38 - 30, headerH + (mainH - 26) / 2.0, 26, 26);
+    _titleLabel.frame = CGRectMake(56, headerH + 6, cardW - 56 - 104, mainH - 12);
 
     CGFloat y = 4 + headerH + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {

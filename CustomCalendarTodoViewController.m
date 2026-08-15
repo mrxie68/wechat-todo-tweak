@@ -220,26 +220,22 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     [self.calendarCard addSubview:self.calendarView];
 
     // 底部行：全部书签（筛选视图）+ 统计
-    // 顶部居中：全部书签 / 今日统计（整条与卡片同宽）
+    // 全部书签 / 今日统计：放在日历卡片下方（页面背景上）
     self.bookmarkButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
     self.bookmarkButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.bookmarkButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
     self.bookmarkButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
     [self.bookmarkButton addTarget:self action:@selector(toggleBookmarkMode) forControlEvents:UIControlEventTouchUpInside];
-    [self.calendarCard addSubview:self.bookmarkButton];
+    [self.view addSubview:self.bookmarkButton];
 
     self.statsButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.statsButton setTitle:@"今日统计" forState:UIControlStateNormal];
     self.statsButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.statsButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
     self.statsButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
     [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.calendarCard addSubview:self.statsButton];
-
-    // 分隔线
-    UIView *hairline = [[UIView alloc] initWithFrame:CGRectZero];
-    hairline.tag = 110;
-    hairline.backgroundColor = [UIColor separatorColor];
-    [self.calendarCard addSubview:hairline];
+    [self.view addSubview:self.statsButton];
 }
 
 - (void)rebuildDays {
@@ -564,7 +560,19 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
                                                                       initialText:initial
                                                                        completion:completion];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    // 导航栏强制不透明白，避免顶部透明
+    nav.navigationBar.translucent = NO;
+    nav.navigationBar.barTintColor = [UIColor systemBackgroundColor];
+    if (@available(iOS 13.0, *)) {
+        UINavigationBarAppearance *app = [[UINavigationBarAppearance alloc] init];
+        [app configureWithOpaqueBackground];
+        app.backgroundColor = [UIColor systemBackgroundColor];
+        app.shadowColor = [UIColor clearColor];
+        nav.navigationBar.standardAppearance = app;
+        nav.navigationBar.scrollEdgeAppearance = app;
+    }
+    nav.view.backgroundColor = [UIColor systemBackgroundColor];
     [self presentViewController:nav animated:YES completion:nil];
 }
 
@@ -680,24 +688,23 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     // 白色日历卡片：月份行 + 日期条 + 底部行（书签/统计）
     CGFloat cardX = 24, cardW = w - 48; // 卡片整体往内收
     CGFloat cardY = sa.top + 48 + 10;
-    CGFloat cardH = 36 + 8 + 32 + 8 + 78 + 12; // 174
+    CGFloat cardH = 12 + 32 + 8 + 78 + 12; // 142
     self.calendarCard.frame = CGRectMake(cardX, cardY, cardW, cardH);
-    // 顶部居中：全部书签 / 今日统计（整条与卡片同宽）
-    self.bookmarkButton.frame = CGRectMake((cardW / 2.0) - 96, 0, 80, 36);
-    self.statsButton.frame = CGRectMake((cardW / 2.0) + 16, 0, 80, 36);
-    UIView *hairline = [self.calendarCard viewWithTag:110];
-    hairline.frame = CGRectMake(0, 35.5, cardW, 0.5);
     // 月份行
-    self.prevMonthButton.frame = CGRectMake(28, 44, 32, 32);
-    self.nextMonthButton.frame = CGRectMake(cardW - 60, 44, 32, 32);
-    self.monthLabel.frame = CGRectMake(64, 44, cardW - 128, 32);
-    self.calendarView.frame = CGRectMake(0, 84, cardW, 78);
+    self.prevMonthButton.frame = CGRectMake(28, 12, 32, 32);
+    self.nextMonthButton.frame = CGRectMake(cardW - 60, 12, 32, 32);
+    self.monthLabel.frame = CGRectMake(64, 12, cardW - 128, 32);
+    self.calendarView.frame = CGRectMake(0, 52, cardW, 78);
     if (!self.didInitialScroll) {
         self.didInitialScroll = YES;
         [self scrollToSelectedDayAnimated:NO]; // 首次布局后再定位到今天，保证可见
     }
+    // 全部书签 / 今日统计：日历卡片下方
+    CGFloat rowY = cardY + cardH + 8;
+    self.bookmarkButton.frame = CGRectMake(cardX, rowY, cardW / 2.0, 30);
+    self.statsButton.frame = CGRectMake(cardX + cardW / 2.0, rowY, cardW / 2.0, 30);
 
-    CGFloat headerY = cardY + cardH + 12;
+    CGFloat headerY = rowY + 30 + 8;
     self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 40, 24);
 
     CGFloat tableY = headerY + 24 + 4;
