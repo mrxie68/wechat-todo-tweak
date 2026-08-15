@@ -263,8 +263,9 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
         request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
         [request setTimeoutInterval:10];
 
-        [[NSURLSession sharedSession] dataTaskWithRequest:request
-                                       completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+                                      dataTaskWithRequest:request
+                                      completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)resp;
             if (!err && http.statusCode >= 200 && http.statusCode < 300) {
                 okCount++;
@@ -277,7 +278,8 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
                 done = YES;
                 dispatch_semaphore_signal(sem);
             }
-        }] resume];
+        }];
+        [task resume];
     }
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
     if (!done) {

@@ -42,6 +42,8 @@
 - (void)AddMsg:(NSString *)chatId MsgWrap:(CMessageWrap *)wrap;
 @end
 
+static NSString *ensureTodoSessionDiagnostic(void); // 前向声明（定义在下方）
+
 #pragma mark - 基础工具
 
 static CMessageMgr *wechatMessageMgr(void) {
@@ -388,7 +390,7 @@ static NSArray *aiFindDatabaseFiles(void) {
 }
 
 // 在会话库里插入“待办事项”本机会话（只在表里有 UserName 列时才写，写失败不影响微信）
-+ (NSString *)ensureTodoSessionDiagnostic {
+static NSString *ensureTodoSessionDiagnostic(void) {
     NSArray *dbs = aiFindDatabaseFiles();
     for (NSDictionary *d in dbs) {
         sqlite3 *db = NULL;
