@@ -339,12 +339,14 @@ static void runTodoContactCleanupOnce(void) {
     });
 }
 
-#pragma mark - 主界面判断 + 底部上滑呼出待办页
+#pragma mark - 底部菜单加“待办”tab（第 5 个）
 
 static UIWindow *g_todoWindow = nil;
-static UIButton *g_todoHint = nil;
-static BOOL g_todoPanTriggered = NO;
-static BOOL g_gestureInstalled = NO;
+static UIView *g_todoTabContainer = nil;
+static UIView *g_todoTabItemView = nil;
+static BOOL g_tabSwizzled = NO;
+static BOOL g_inTabRelayout = NO;
+static void (*orig_tabLayoutSubviews)(id, SEL);
 
 static NSObject *g_diagLock = nil;
 static NSMutableArray *g_diagEvents = nil;
@@ -364,7 +366,7 @@ static void diagLog(NSString *fmt, ...) {
     NSLog(kAITodoLogPrefix "%@", msg);
 }
 
-// 找到底部 tab 栏容器（类名含 TaskBar/TabBar 且贴近窗口底部）
+// 找到底部 tab 栏容器（微信是 MMTabBar，类名含 TabBar 且贴近窗口底部）
 static UIView *findBottomTabContainer(UIWindow *window) {
     if (!window) return nil;
     NSMutableArray *queue = [NSMutableArray arrayWithObject:window];
@@ -387,292 +389,50 @@ static UIView *findBottomTabContainer(UIWindow *window) {
     return nil;
 }
 
-// 从容器里找“一排等宽的 tab 项”（微信是 4 个，横向铺满容器）
-static UIView *g_todoTabItemView = nil; // 我们自己加的“待办”tab（探测时跳过它）
-
-static NSArray *findTabItemRow(UIView *container) {
-    if (!container) return nil;
+// 判断视图是否占据“tab 项槽位”（x≈i*1/4、宽≈1/4、在 tab 栏内容区），返回槽位号 0-3，否则 -1
+static NSInteger tabSlotForView(UIView *s, UIView *container) {
     CGFloat cw = container.bounds.size.width;
-    if (cw <= 0) return nil;
-    NSMutableArray *candidates = [NSMutableArray arrayWithObject:container];
-    [candidates addObjectsFromArray:container.subviews];
-    for (UIView *cand in candidates) {
-        NSArray *subs = cand.subviews;
-        if (subs.count < 4 || subs.count > 8) continue;
-        NSMutableArray *items = [NSMutableArray array];
-        for (UIView *s in subs) {
-            if (s == g_todoTabItemView) continue; // 跳过我们自己加的 tab
-            CGRect f = s.frame;
-            if (f.size.width > cw / 8.0 && f.size.width < cw / 2.5 &&
-                f.size.height >= 30 && f.origin.y >= -5 && f.origin.y < cand.bounds.size.height) {
-                [items addObject:s];
-            }
-        }
-        if (items.count != 4) continue;
-        [items sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
-            if (a.frame.origin.x < b.frame.origin.x) return NSOrderedAscending;
-            if (a.frame.origin.x > b.frame.origin.x) return NSOrderedDescending;
-            return NSOrderedSame;
-        }];
-        UIView *first = items[0];
-        UIView *last = items[3];
-        CGFloat expectW = cw / 4.0;
-        BOOL ok = fabs(first.frame.origin.x - 0) <= cw * 0.05 &&
-                  fabs(last.frame.origin.x + last.frame.size.width - cw) <= cw * 0.08 &&
-                  fabs(first.frame.size.width - expectW) <= cw * 0.12;
-        if (ok) return items;
+    if (cw <= 0) return -1;
+    CGRect f = s.frame;
+    if (f.size.height < 30 || f.origin.y < 0) return -1;
+    if (f.size.width < cw / 8.0 || f.size.width > cw / 2.5) return -1;
+    for (NSInteger i = 0; i < 4; i++) {
+        CGFloat expect = i * cw / 4.0;
+        if (fabs(f.origin.x - expect) <= cw * 0.06) return i;
     }
-    return nil;
+    return -1;
 }
 
-// 窗口视图层级里是否存在微信主界面的底部 tab 栏
-static BOOL windowHasBottomBar(UIWindow *window) {
-    return findBottomTabContainer(window) != nil;
-}
-
-static BOOL g_cachedMainVisible = NO;
-static NSTimeInterval g_cachedMainTime = 0;
-
-// 当前真正显示在最上层的控制器（走完 presented + 导航栈）
-static UIViewController *visibleViewController(void) {
-    UIViewController *vc = tweakTopViewController();
-    while (vc) {
-        if ([vc isKindOfClass:[UINavigationController class]]) {
-            UIViewController *t = ((UINavigationController *)vc).topViewController;
-            if (t && t != vc) {
-                vc = t;
-                continue;
-            }
-        }
-        break;
-    }
-    return vc;
-}
-
-// 主界面是否可见：只有最上层就是主界面、且底部 tab 栏还在层级里才算。
-// 自己的待办页/设置页、微信弹层、聊天页（tab 栏会被移除）都会自动排除，避免误触。
-static BOOL isMainFrameVisible(void) {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - g_cachedMainTime < 0.3) return g_cachedMainVisible;
-
-    BOOL visible = NO;
-    UIViewController *top = visibleViewController();
-    if (top) {
-        NSString *topCls = NSStringFromClass([top class]);
-        if ([topCls rangeOfString:@"NewMainFrame"].location != NSNotFound ||
-            [topCls rangeOfString:@"MainFrame"].location != NSNotFound) {
-            UIWindow *window = g_todoWindow ?: [UIApplication sharedApplication].keyWindow;
-            visible = windowHasBottomBar(window);
-        }
-    }
-    g_cachedMainTime = now;
-    g_cachedMainVisible = visible;
-    return visible;
-}
-
-@interface TodoGestureTarget : NSObject <UIGestureRecognizerDelegate>
-@end
-
-static TodoGestureTarget *g_todoGestureTarget = nil;
-
-@implementation TodoGestureTarget
-
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
-       shouldReceiveTouch:(UITouch *)touch {
-    // 只在主界面且触摸点在底部区域时参与识别
-    BOOL mainVisible = isMainFrameVisible();
-    CGPoint p = [touch locationInView:gestureRecognizer.view];
-    CGRect b = gestureRecognizer.view.bounds;
-    BOOL inZone = p.y >= b.size.height - 88.0;
-    if (inZone) {
-        diagLog(@"底部触摸 y=%.0f main=%d → %@", p.y, mainVisible,
-                mainVisible ? @"参与识别" : @"跳过");
-    }
-    return mainVisible && inZone;
-}
-
-- (void)todoPan:(UIPanGestureRecognizer *)pan {
-    if (pan.state == UIGestureRecognizerStateChanged) {
-        CGPoint t = [pan translationInView:pan.view];
-        // 上滑超过 50pt 且纵向为主，才算有效手势
-        if (t.y < -50 && fabs(t.y) > fabs(t.x)) {
-            g_todoPanTriggered = YES;
-        }
-    } else if (pan.state == UIGestureRecognizerStateEnded) {
-        CGPoint t = [pan translationInView:pan.view];
-        diagLog(@"pan 结束 t=(%.0f,%.0f) trigger=%d", t.x, t.y, g_todoPanTriggered);
-        if (g_todoPanTriggered && t.y < -40) {
-            [TodoPageViewController presentFrom:tweakTopViewController()];
-        }
-        g_todoPanTriggered = NO;
-    } else if (pan.state != UIGestureRecognizerStatePossible) {
-        g_todoPanTriggered = NO;
-    }
-    if (g_todoHint) {
-        g_todoHint.hidden = !isMainFrameVisible();
+// 把 4 个原 tab 项（内容视图 MMTabBarItemView + 按钮 UITabBarButton 等）缩到各 1/5，给第 5 个让位
+static void shrinkExistingTabItems(UIView *container) {
+    CGFloat cw = container.bounds.size.width;
+    if (cw <= 0) return;
+    NSArray *subs = [container.subviews copy];
+    for (UIView *s in subs) {
+        if (s == g_todoTabItemView) continue;
+        NSInteger slot = tabSlotForView(s, container);
+        if (slot < 0) continue;
+        CGRect f = s.frame;
+        f.origin.x = slot * cw / 5.0;
+        f.size.width = cw / 5.0;
+        s.frame = f;
     }
 }
 
-- (void)todoHintTapped {
-    diagLog(@"提示条点击，打开待办页");
-    [TodoPageViewController presentFrom:tweakTopViewController()];
-}
-
-- (void)todoTabTapped {
-    diagLog(@"底部菜单「待办」tab 点击");
-    [TodoPageViewController presentFrom:tweakTopViewController()];
-}
-
-@end
-
-static void installTodoGestureAndHint(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_gestureInstalled) return;
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
-        if (!window) window = [UIApplication sharedApplication].windows.firstObject;
-        if (!window) return;
-        // 多窗口时优先选包含底部 tab 栏的主窗口
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            if (windowHasBottomBar(w)) { window = w; break; }
-        }
-        g_todoWindow = window;
-
-        if (!g_todoGestureTarget) {
-            g_todoGestureTarget = [[TodoGestureTarget alloc] init];
-        }
-        UIPanGestureRecognizer *pan =
-            [[UIPanGestureRecognizer alloc] initWithTarget:g_todoGestureTarget
-                                                    action:@selector(todoPan:)];
-        pan.delegate = g_todoGestureTarget;
-        [window addGestureRecognizer:pan];
-
-        // 底部小按钮：点击也能打开待办页，同时作为上滑入口提示（不遮挡 tab 按钮）
-        g_todoHint = [UIButton buttonWithType:UIButtonTypeSystem];
-        [g_todoHint setTitle:@"⬆ 待办" forState:UIControlStateNormal];
-        g_todoHint.titleLabel.font = [UIFont systemFontOfSize:11];
-        g_todoHint.tintColor = [UIColor systemGrayColor];
-        g_todoHint.backgroundColor = [UIColor systemGray6Color];
-        g_todoHint.layer.cornerRadius = 11;
-        g_todoHint.layer.borderColor = [UIColor systemGray4Color].CGColor;
-        g_todoHint.layer.borderWidth = 0.5;
-        [g_todoHint addTarget:g_todoGestureTarget
-                       action:@selector(todoHintTapped)
-             forControlEvents:UIControlEventTouchUpInside];
-        [window addSubview:g_todoHint];
-        [window bringSubviewToFront:g_todoHint];
-
-        CGRect b = window.bounds;
-        CGFloat bottomInset = 0;
-        if (@available(iOS 11.0, *)) bottomInset = window.safeAreaInsets.bottom;
-        CGFloat hintW = 66, hintH = 26;
-        g_todoHint.frame = CGRectMake((b.size.width - hintW) / 2.0,
-                                      b.size.height - bottomInset - 49.0 - hintH - 12.0,
-                                      hintW, hintH);
-        g_todoHint.autoresizingMask =
-            UIViewAutoresizingFlexibleLeftMargin |
-            UIViewAutoresizingFlexibleRightMargin |
-            UIViewAutoresizingFlexibleTopMargin;
-        g_todoHint.hidden = !isMainFrameVisible();
-        g_gestureInstalled = YES;
-
-        // 每秒刷新提示可见性（主界面显示时出现，进聊天/设置后隐藏）
-        NSTimer *hintTimer = [NSTimer timerWithTimeInterval:1.0
-                                                     repeats:YES
-                                                       block:^(NSTimer *timer) {
-            if (g_todoHint) g_todoHint.hidden = !isMainFrameVisible();
-        }];
-        [[NSRunLoop mainRunLoop] addTimer:hintTimer forMode:NSRunLoopCommonModes];
-
-        diagLog(@"手势+提示条已安装 window=%@", NSStringFromClass([window class]));
-    });
-}
-
-// 手势诊断（设置页按钮调用，结果复制到剪贴板）
-static NSString *todoTabBarProbe(void); // 前向声明（定义在下方）
-
-NSString *todoGestureDiagnostic(void) {
-    NSMutableString *s = [NSMutableString string];
-    [s appendFormat:@"待办插件 v%@ 手势诊断\n", kAITodoVersion];
-    UIWindow *key = [UIApplication sharedApplication].keyWindow;
-    [s appendFormat:@"keyWindow: %@\n", key ? NSStringFromClass([key class]) : @"无"];
-    UIViewController *root = key ? key.rootViewController : nil;
-    [s appendFormat:@"rootVC: %@\n", root ? NSStringFromClass([root class]) : @"无"];
-    UIViewController *top = tweakTopViewController();
-    [s appendFormat:@"topVC: %@\n", top ? NSStringFromClass([top class]) : @"无"];
-    UIWindow *win = g_todoWindow ?: key;
-    [s appendFormat:@"手势窗口: %@\n", win ? NSStringFromClass([win class]) : @"无"];
-    [s appendFormat:@"底部栏可见: %@\n", windowHasBottomBar(win) ? @"是" : @"否"];
-    [s appendFormat:@"主界面判定: %@\n", isMainFrameVisible() ? @"是" : @"否"];
-    [s appendFormat:@"手势已安装: %@\n", g_gestureInstalled ? @"是" : @"否"];
-    if (win) {
-        NSMutableArray *queue = [NSMutableArray arrayWithObject:win];
-        BOOL found = NO;
-        while (queue.count > 0 && !found) {
-            UIView *v = queue.firstObject;
-            [queue removeObjectAtIndex:0];
-            NSString *cls = NSStringFromClass([v class]);
-            if ([cls rangeOfString:@"TaskBar"].location != NSNotFound ||
-                [cls rangeOfString:@"TabBar"].location != NSNotFound) {
-                [s appendFormat:@"底部栏类: %@\n", cls];
-                found = YES;
-                break;
-            }
-            [queue addObjectsFromArray:v.subviews];
-        }
-        if (!found) [s appendString:@"底部栏类: 未找到\n"];
-    }
-    @synchronized (g_diagLock) {
-        [s appendString:@"\n事件日志（最近40条）:\n"];
-        for (NSString *e in g_diagEvents) {
-            [s appendFormat:@"%@\n", e];
-        }
-    }
-    [s appendString:@"\n== 底部菜单探测 ==\n"];
-    [s appendString:todoTabBarProbe()];
-    return s.length ? s : @"无数据";
-}
-
-#pragma mark - 底部菜单加“待办”tab（第 5 个）
-
-static UIView *g_todoTabContainer = nil;
-static NSArray *g_todoTabItems = nil; // 安装时记住的 4 个原 tab 项
-static BOOL g_tabSwizzled = NO;
-static BOOL g_inTabRelayout = NO;
-static void (*orig_tabLayoutSubviews)(id, SEL);
-
-// 重排：4 个原 tab 各占 1/5，我们的待办 tab 占第 5 个 1/5
+// 重排：微信每次布局后调它，恢复缩窄 + 待办 tab 归位
 static void relayoutTodoTabItems(void) {
     UIView *container = g_todoTabContainer;
     if (!container) return;
-    NSArray *items = g_todoTabItems;
-    if (items.count != 4) return;
-    // 校验引用还在容器上；微信重建子视图时重新探测一次
-    BOOL valid = YES;
-    for (UIView *it in items) {
-        if (it.superview != container) { valid = NO; break; }
-    }
-    if (!valid) {
-        items = findTabItemRow(container);
-        if (items.count != 4) return;
-        g_todoTabItems = items;
-    }
     CGFloat cw = container.bounds.size.width;
     if (cw <= 0) return;
-    CGFloat newW = cw / 5.0;
-    for (NSUInteger i = 0; i < items.count; i++) {
-        UIView *it = items[i];
-        CGRect f = it.frame;
-        f.origin.x = i * newW;
-        f.size.width = newW;
-        it.frame = f;
-    }
+    shrinkExistingTabItems(container);
     if (g_todoTabItemView) {
         if (g_todoTabItemView.superview != container) {
             [container addSubview:g_todoTabItemView]; // 微信重建子视图后补回来
         }
         CGRect f = g_todoTabItemView.frame;
-        f.origin.x = 4 * newW;
-        f.size.width = newW;
+        f.origin.x = 4 * cw / 5.0;
+        f.size.width = cw / 5.0;
         g_todoTabItemView.frame = f;
         [container bringSubviewToFront:g_todoTabItemView];
     }
@@ -689,14 +449,27 @@ static void swz_tabLayoutSubviews(id self, SEL _cmd) {
     }
 }
 
-// 生成“待办”tab 项视图（图标 + 文字，点击打开待办页）
+@interface TodoTabTarget : NSObject
+@end
+
+static TodoTabTarget *g_todoTabTarget = nil;
+
+@implementation TodoTabTarget
+
+- (void)todoTabTapped {
+    diagLog(@"底部菜单「待办」tab 点击");
+    [TodoPageViewController presentFrom:tweakTopViewController()];
+}
+
+@end
+
+// 生成“待办”tab 项视图（仿 MMTabBarItemView：28pt 图标 + 底部 12pt 文字）
 static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     UIView *item = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
     item.userInteractionEnabled = YES;
 
-    CGFloat iconSize = 40.0;
-    CGFloat iconY = 6.0;
-    if (height < 55) iconY = 2.0;
+    CGFloat iconSize = 28.0;
+    CGFloat iconY = 8.0;
     UIImageView *iv = [[UIImageView alloc]
                        initWithFrame:CGRectMake((width - iconSize) / 2.0, iconY, iconSize, iconSize)];
     iv.contentMode = UIViewContentModeScaleAspectFit;
@@ -709,7 +482,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     iv.tintColor = [UIColor systemGrayColor];
     [item addSubview:iv];
 
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 20, width, 14)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 17, width, 12)];
     label.text = @"待办";
     label.font = [UIFont systemFontOfSize:10];
     label.textColor = [UIColor systemGrayColor];
@@ -717,13 +490,13 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     [item addSubview:label];
 
     UITapGestureRecognizer *tap =
-        [[UITapGestureRecognizer alloc] initWithTarget:g_todoGestureTarget
+        [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
                                                 action:@selector(todoTabTapped)];
     [item addGestureRecognizer:tap];
     return item;
 }
 
-// 结构匹配才加：容器 + 恰好 4 个等宽 tab 项，否则静默跳过（诊断里能看到原因）
+// 结构匹配才加：容器 + 4 个 tab 项槽位存在，否则静默跳过（诊断里能看到原因）
 static void installTodoTabItem(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_todoTabItemView) return;
@@ -731,17 +504,30 @@ static void installTodoTabItem(void) {
         if (!window) return;
         UIView *container = findBottomTabContainer(window);
         if (!container) return;
-        NSArray *items = findTabItemRow(container);
-        if (items.count != 4) return;
+        g_todoWindow = window;
 
-        if (!g_todoGestureTarget) {
-            g_todoGestureTarget = [[TodoGestureTarget alloc] init];
+        // 先确认有 4 个 tab 项槽位（防止误判其它视图）
+        NSInteger slotCount = 0;
+        for (UIView *s in container.subviews) {
+            if (s == g_todoTabItemView) continue;
+            if (tabSlotForView(s, container) >= 0) slotCount++;
         }
-        UIView *first = items[0];
+        if (slotCount < 4) return;
+
+        if (!g_todoTabTarget) {
+            g_todoTabTarget = [[TodoTabTarget alloc] init];
+        }
         CGFloat newW = container.bounds.size.width / 5.0;
-        g_todoTabItems = items;
-        g_todoTabItemView = makeTodoTabItemView(newW, first.frame.size.height);
-        g_todoTabItemView.frame = CGRectMake(4 * newW, first.frame.origin.y, newW, first.frame.size.height);
+        CGFloat itemY = 0, itemH = 55.0;
+        for (UIView *s in container.subviews) {
+            if (tabSlotForView(s, container) >= 0) {
+                itemY = s.frame.origin.y;
+                itemH = s.frame.size.height;
+                break;
+            }
+        }
+        g_todoTabItemView = makeTodoTabItemView(newW, itemH);
+        g_todoTabItemView.frame = CGRectMake(4 * newW, itemY, newW, itemH);
         [container addSubview:g_todoTabItemView];
         g_todoTabContainer = container;
         relayoutTodoTabItems();
@@ -756,9 +542,35 @@ static void installTodoTabItem(void) {
                 g_tabSwizzled = YES;
             }
         }
-        diagLog(@"底部菜单已加第5个tab（容器=%@ 原项=%lu）",
-                NSStringFromClass(cls), (unsigned long)items.count);
+        diagLog(@"底部菜单已加第5个tab（容器=%@ 槽位=%ld）",
+                NSStringFromClass(cls), (long)slotCount);
     });
+}
+
+// 诊断（设置页按钮调用，结果复制到剪贴板）
+static NSString *todoTabBarProbe(void); // 前向声明（定义在下方）
+
+NSString *todoTabDiagnostic(void) {
+    NSMutableString *s = [NSMutableString string];
+    [s appendFormat:@"待办插件 v%@ 诊断\n", kAITodoVersion];
+    UIWindow *key = [UIApplication sharedApplication].keyWindow;
+    [s appendFormat:@"keyWindow: %@\n", key ? NSStringFromClass([key class]) : @"无"];
+    UIViewController *root = key ? key.rootViewController : nil;
+    [s appendFormat:@"rootVC: %@\n", root ? NSStringFromClass([root class]) : @"无"];
+    UIWindow *win = g_todoWindow ?: key;
+    [s appendFormat:@"主窗口: %@\n", win ? NSStringFromClass([win class]) : @"无"];
+    UIView *container = findBottomTabContainer(win);
+    [s appendFormat:@"tab 容器: %@\n", container ? NSStringFromClass([container class]) : @"未找到"];
+    [s appendFormat:@"第5个tab已加: %@\n", g_todoTabItemView ? @"是" : @"否"];
+    @synchronized (g_diagLock) {
+        [s appendString:@"\n事件日志（最近40条）:\n"];
+        for (NSString *e in g_diagEvents) {
+            [s appendFormat:@"%@\n", e];
+        }
+    }
+    [s appendString:@"\n== 底部菜单探测 ==\n"];
+    [s appendString:todoTabBarProbe()];
+    return s.length ? s : @"无数据";
 }
 
 // 底部菜单结构探测（诊断用，结果进剪贴板）
@@ -798,12 +610,19 @@ static NSString *todoTabBarProbe(void) {
     UIView *container = findBottomTabContainer(win);
     [s appendFormat:@"tab 容器: %@\n", container ? NSStringFromClass([container class]) : @"未找到"];
     if (container) {
-        NSArray *items = findTabItemRow(container);
-        [s appendFormat:@"等宽 tab 项: %lu 个\n", (unsigned long)items.count];
-        for (UIView *it in items) {
-            [s appendFormat:@"  %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
-             NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
-             it.frame.size.width, it.frame.size.height];
+        NSInteger slotCount = 0;
+        for (UIView *it in container.subviews) {
+            if (it == g_todoTabItemView) continue;
+            if (tabSlotForView(it, container) >= 0) slotCount++;
+        }
+        [s appendFormat:@"tab 槽位视图: %ld 个\n", (long)slotCount];
+        for (UIView *it in container.subviews) {
+            if (it == g_todoTabItemView) continue;
+            if (tabSlotForView(it, container) >= 0) {
+                [s appendFormat:@"  %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
+                 NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
+                 it.frame.size.width, it.frame.size.height];
+            }
         }
     }
     // 兜底：不依赖类名，按位置找底部条（防止 tab 栏类名和猜测不一致）
@@ -905,7 +724,6 @@ static void WeChatTodoInit(void) {
                                                   usingBlock:^(NSNotification *note) {
         registerWithWCPlugins(10);
         installHooks();
-        installTodoGestureAndHint();
         // 底部菜单加“待办”tab：微信结构加载较慢，分几次尝试
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ installTodoTabItem(); });
@@ -929,7 +747,6 @@ static void WeChatTodoInit(void) {
                    dispatch_get_main_queue(), ^{
         registerWithWCPlugins(10);
         installHooks();
-        installTodoGestureAndHint();
         installTodoTabItem();
     });
 }

@@ -4,7 +4,7 @@
 #import "TodoPageViewController.h"
 #import "AIConfig.h"
 
-extern NSString *todoGestureDiagnostic(void); // 由 WeChatTodoTweak.m 提供
+extern NSString *todoTabDiagnostic(void); // 由 WeChatTodoTweak.m 提供
 
 @interface TodoSettingsViewController () <UITextFieldDelegate>
 @property (nonatomic, strong) UIScrollView *scrollView;
@@ -44,7 +44,7 @@ static void todoAlert(NSString *msg); // 前向声明
 
     // 使用说明
     UILabel *intro = [[UILabel alloc] initWithFrame:CGRectMake(x, y, cardW, 60)];
-    intro.text = @"主界面底部中间的「⬆ 待办」按钮，或从底部向上滑，即可打开待办页。\n像普通待办 App 一样：添加、勾选、删除、同步。";
+    intro.text = @"微信底部菜单新增「待办」tab，点它直接进待办页。\n像普通待办 App 一样：添加、勾选、删除、同步。";
     intro.numberOfLines = 0;
     intro.font = [UIFont systemFontOfSize:13];
     intro.textColor = [UIColor secondaryLabelColor];
@@ -59,9 +59,9 @@ static void todoAlert(NSString *msg); // 前向声明
     y += 44 + 12;
 
     // 手势诊断
-    UIButton *diagBtn = [self makeButton:@"🔍 诊断（手势+底部菜单，复制到剪贴板）"];
+    UIButton *diagBtn = [self makeButton:@"🔍 诊断（底部菜单，复制到剪贴板）"];
     diagBtn.frame = CGRectMake(x, y, cardW, 44);
-    [diagBtn addTarget:self action:@selector(gestureDiagTapped) forControlEvents:UIControlEventTouchUpInside];
+    [diagBtn addTarget:self action:@selector(diagTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.contentView addSubview:diagBtn];
     y += 44 + 12;
 
@@ -170,22 +170,22 @@ static void todoAlert(NSString *msg); // 前向声明
     return full;
 }
 
-- (void)gestureDiagTapped {
+- (void)diagTapped {
     [self.view endEditing:YES];
     UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"正在诊断"
-                                                                     message:@"正在读取手势状态…\n\n"
+                                                                     message:@"正在读取底部菜单结构…\n\n"
                                                               preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:progress animated:YES completion:nil];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block NSString *diag = nil;
         // 诊断会读 UI 层级，必须在主线程执行
         dispatch_sync(dispatch_get_main_queue(), ^{
-            diag = todoGestureDiagnostic();
+            diag = todoTabDiagnostic();
         });
         dispatch_async(dispatch_get_main_queue(), ^{
             NSString *shortText = [self consumeDiagnostic:diag];
             [progress dismissViewControllerAnimated:NO completion:^{
-                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"手势诊断"
+                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"诊断结果"
                                                                            message:shortText
                                                                     preferredStyle:UIAlertControllerStyleAlert];
                 [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
