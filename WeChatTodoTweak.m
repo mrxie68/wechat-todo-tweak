@@ -464,8 +464,9 @@ static NSString *ensureTodoSessionDiagnostic(void) {
             if (isSessionLike || isChatLike) {
                 if (isSessionLike) sessionCount++; else chatCount++;
                 // 记录第一张会话表（SessionTable/session.db）的字段结构
+                NSString *dbPath = (NSString *)d[@"path"];
                 if (isSessionLike && sessionTableColumns.length == 0 &&
-                    [d[@"path"].lowercaseString containsString:@"session"]) {
+                    [dbPath.lowercaseString containsString:@"session"]) {
                     sessionTableColumns = [NSString stringWithFormat:
                                            @"\n%@ 列：%@", tbl, aiSQLiteColumnInfo(db, tbl)];
                 }
