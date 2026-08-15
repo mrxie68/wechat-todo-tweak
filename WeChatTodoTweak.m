@@ -285,6 +285,7 @@ static NSString *createTodoSessionOnMain(void) {
                     knownNow = known2 != nil;
                 }
             }
+            id modifiedContact = nil;
             // 微信自动建的联系人昵称=用户名，直接改它再保存（这才是列表显示用的对象）
             if ([contactMgr respondsToSelector:@selector(getContactByName:)]) {
                 id existing = [contactMgr getContactByName:kAITodoChatId];
@@ -317,8 +318,22 @@ static NSString *createTodoSessionOnMain(void) {
                                        @"；改后昵称:%@ 备注:%@",
                                        nickAfter.length ? nickAfter : @"空",
                                        remarkAfter.length ? remarkAfter : @"空"];
+                        modifiedContact = after;
                     } @catch (NSException *e) {
                         contactNote = [contactNote stringByAppendingFormat:@"；改备注异常:%@", e];
+                    }
+                }
+            }
+            // 把改好的联系人挂到会话对象上（列表显示名读的是会话的 m_contact）
+            if (modifiedContact && [mgr respondsToSelector:@selector(GetSessionByUserName:)]) {
+                id sess = [mgr GetSessionByUserName:kAITodoChatId];
+                if (sess) {
+                    @try {
+                        [sess setValue:modifiedContact forKey:@"m_contact"];
+                        [mgr AddOrModifySession:sess withNotifyFlag:YES immediateRefresh:YES];
+                        contactNote = [contactNote stringByAppendingString:@"；已挂到会话"];
+                    } @catch (NSException *e) {
+                        contactNote = [contactNote stringByAppendingFormat:@"；挂会话异常:%@", e];
                     }
                 }
             }
