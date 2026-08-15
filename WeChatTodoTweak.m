@@ -51,6 +51,8 @@
 @interface CContactMgr : NSObject
 - (id)getSelfContact;
 - (void)addContact:(id)contact;
+- (void)addContact:(id)contact importInfo:(id)info;
+- (void)saveContact:(id)contact;
 - (void)insertContact:(id)contact;
 - (id)getContactByName:(NSString *)userName;
 @end
@@ -91,6 +93,44 @@ static NSString *aiMD5Hex(NSString *input);
 static NSArray *aiFindDatabaseFiles(void);
 static NSArray *aiSQLiteTableNames(sqlite3 *db);
 static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
+
+// 找到聊天列表主界面 VC（NewMainFrameViewController）
+static UIViewController *findNewMainFrameVC(void) {
+    UIViewController *top = tweakTopViewController();
+    NSArray *stack = top.navigationController.viewControllers;
+    for (UIViewController *vc in stack) {
+        if ([NSStringFromClass([vc class]) rangeOfString:@"NewMainFrame"].location != NSNotFound) {
+            return vc;
+        }
+    }
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        UIViewController *vc = w.rootViewController;
+        while (vc) {
+            if ([NSStringFromClass([vc class]) rangeOfString:@"NewMainFrame"].location != NSNotFound) {
+                return vc;
+            }
+            vc = vc.presentedViewController;
+        }
+    }
+    return nil;
+}
+
+// 强制刷新聊天列表表格（找到 UITableView 后 reloadData）
+static BOOL reloadMainFrameTable(void) {
+    UIViewController *mvc = findNewMainFrameVC();
+    if (!mvc) return NO;
+    NSMutableArray *queue = [NSMutableArray arrayWithObject:mvc.view];
+    while (queue.count > 0) {
+        UIView *v = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([v isKindOfClass:[UITableView class]]) {
+            [(UITableView *)v reloadData];
+            return YES;
+        }
+        [queue addObjectsFromArray:v.subviews];
+    }
+    return NO;
+}
 
 // 在主线程构造并调用微信原生接口（AddOrModifySession: 是 UI 操作，必须主线程）
 static NSString *createTodoSessionOnMain(void) {
@@ -180,11 +220,27 @@ static NSString *createTodoSessionOnMain(void) {
                 [contactMgr insertContact:contact];
                 contactNote = @"已调用 insertContact:";
             }
+            // 回读，仍未注册就换其他方法
+            BOOL knownNow = NO;
             if ([contactMgr respondsToSelector:@selector(getContactByName:)]) {
                 id known = [contactMgr getContactByName:kAITodoChatId];
-                contactNote = [contactNote stringByAppendingFormat:@"（回读%@）",
-                               known ? @"已知" : @"未知"];
+                knownNow = known != nil;
             }
+            if (!knownNow) {
+                if ([contactMgr respondsToSelector:@selector(addContact:importInfo:)]) {
+                    [contactMgr addContact:contact importInfo:nil];
+                    contactNote = @"已调用 addContact:importInfo:";
+                } else if ([contactMgr respondsToSelector:@selector(saveContact:)]) {
+                    [contactMgr saveContact:contact];
+                    contactNote = @"已调用 saveContact:";
+                }
+                if ([contactMgr respondsToSelector:@selector(getContactByName:)]) {
+                    id known2 = [contactMgr getContactByName:kAITodoChatId];
+                    knownNow = known2 != nil;
+                }
+            }
+            contactNote = [contactNote stringByAppendingFormat:@"（回读%@）",
+                           knownNow ? @"已知" : @"未知"];
         }
         // 强制刷新会话列表（更新+重建兜底）
         Class mainMgrCls = NSClassFromString(@"MainSessionMgr");
@@ -227,6 +283,8 @@ static NSString *createTodoSessionOnMain(void) {
         if ([mainMgr respondsToSelector:@selector(updateMainSessionList)]) {
             [mainMgr updateMainSessionList];
         }
+        BOOL reloaded = reloadMainFrameTable();
+        [diags addObject:reloaded ? @"已强制刷新聊天列表" : @"未找到主界面表格"];
         [diags addObject:contactNote];
         return [NSString stringWithFormat:@"✅ 已执行\n%@", [diags componentsJoinedByString:@"；"]];
     } @catch (NSException *e) {
