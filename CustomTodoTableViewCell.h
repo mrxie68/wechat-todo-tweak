@@ -20,6 +20,7 @@
 @property (nonatomic, strong) UIButton *bookmarkButton;
 @property (nonatomic, strong) UIButton *plusButton;
 @property (nonatomic, strong) NSMutableArray *subRows;
+@property (nonatomic, strong) UIView *headerBar;
 @property (nonatomic, strong) UITapGestureRecognizer *cardTapGesture;
 @property (nonatomic, strong) UILongPressGestureRecognizer *cardLongPressGesture;
 

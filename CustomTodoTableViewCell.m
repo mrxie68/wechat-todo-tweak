@@ -45,12 +45,21 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         _timeLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _timeLabel.font = [UIFont systemFontOfSize:13];
         _timeLabel.textColor = [UIColor secondaryLabelColor];
-        [self.contentView addSubview:_timeLabel];
+        _timeLabel.textAlignment = NSTextAlignmentCenter;
 
         _cardView = [[UIView alloc] initWithFrame:CGRectZero];
         _cardView.layer.cornerRadius = 14;
         _cardView.clipsToBounds = YES;
         [self.contentView addSubview:_cardView];
+
+        // 顶部书签条：和卡片同宽，收藏时泛金；时间居中显示在条上
+        _headerBar = [[UIView alloc] initWithFrame:CGRectZero];
+        [self.cardView addSubview:_headerBar];
+        UIView *hairline = [[UIView alloc] initWithFrame:CGRectZero];
+        hairline.tag = 3;
+        hairline.backgroundColor = [UIColor separatorColor];
+        [self.cardView addSubview:hairline];
+        [self.cardView addSubview:_timeLabel];
 
         _iconBg = [[UIView alloc] initWithFrame:CGRectZero];
         _iconBg.layer.cornerRadius = 9;
@@ -107,6 +116,19 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     _timeLabel.text = [fmt stringFromDate:todo.createTime];
 
     _cardView.backgroundColor = todo.isSelected ? cardSelectedColor() : cardUnselectedColor();
+
+    // 书签条：收藏时整条泛金（长度=卡片宽度），时间居中
+    if (@available(iOS 13.0, *)) {
+        _headerBar.backgroundColor =
+            [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+                return trait.userInterfaceStyle == UIUserInterfaceStyleDark
+                    ? [UIColor colorWithRed:0.45 green:0.38 blue:0.24 alpha:1.0]
+                    : [UIColor colorWithRed:0.99 green:0.94 blue:0.83 alpha:1.0];
+            }];
+    } else {
+        _headerBar.backgroundColor = [UIColor colorWithRed:0.99 green:0.94 blue:0.83 alpha:1.0];
+    }
+    _headerBar.hidden = !todo.isBookmarked;
 
     // 图标
     _iconBg.backgroundColor = todo.isSelected
@@ -216,25 +238,27 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
-    CGFloat h = self.contentView.bounds.size.height;
-    CGFloat timeW = 44;
-    _timeLabel.frame = CGRectMake(12, (h - 18) / 2.0, timeW, 18);
-
+    CGFloat headerH = 28;
     CGFloat mainH = 64;
-    CGFloat cardX = 64;
+    CGFloat cardX = 12;
     CGFloat cardW = w - cardX - 12;
-    _cardView.frame = CGRectMake(cardX, 4, cardW, mainH);
+    _cardView.frame = CGRectMake(cardX, 4, cardW, headerH + mainH);
+
+    _headerBar.frame = CGRectMake(0, 0, cardW, headerH);
+    UIView *hairline = [_cardView viewWithTag:3];
+    hairline.frame = CGRectMake(0, headerH - 0.5, cardW, 0.5);
+    _timeLabel.frame = CGRectMake(0, 0, cardW - 34, headerH);
+    _bookmarkButton.frame = CGRectMake(cardW - 30, (headerH - 26) / 2.0, 26, 26);
 
     CGFloat iconSize = 34;
-    _iconBg.frame = CGRectMake(12, (mainH - iconSize) / 2.0, iconSize, iconSize);
+    _iconBg.frame = CGRectMake(12, headerH + (mainH - iconSize) / 2.0, iconSize, iconSize);
     _iconView.frame = CGRectInset(_iconBg.bounds, 8, 8);
 
     CGFloat rightX = cardW - 12;
-    _plusButton.frame = CGRectMake(rightX - 38, (mainH - 38) / 2.0, 38, 38);
-    _bookmarkButton.frame = CGRectMake(rightX - 38 - 30, (mainH - 26) / 2.0, 26, 26);
-    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 104, mainH - 12);
+    _plusButton.frame = CGRectMake(rightX - 38, headerH + (mainH - 38) / 2.0, 38, 38);
+    _titleLabel.frame = CGRectMake(56, headerH + 6, cardW - 56 - 50, mainH - 12);
 
-    CGFloat y = 4 + mainH + 4;
+    CGFloat y = 4 + headerH + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
         UIImageView *check = (UIImageView *)[row viewWithTag:1];
@@ -271,10 +295,11 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 }
 
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
+    CGFloat headerH = 28;
     CGFloat mainH = 64;
     CGFloat subH = 0;
     if (todo.isSelected) {
-        CGFloat cardX = 64, cardRight = 12;
+        CGFloat cardX = 12, cardRight = 12;
         CGFloat cardW = width - cardX - cardRight;
         CGFloat labelW = cardW - 14 - 32;
         for (SubTaskItem *s in todo.subTasks) {
@@ -282,7 +307,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             subH += MAX(34, lines * 17 + 14);
         }
     }
-    return 4 + mainH + 4 + subH + 4;
+    return 4 + headerH + mainH + 4 + subH + 4;
 }
 
 @end
