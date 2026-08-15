@@ -58,6 +58,7 @@
 @interface CContact : NSObject
 @property (nonatomic, retain) NSString *m_nsUsrName;
 @property (nonatomic, retain) NSString *m_nsNickName;
+- (id)initWithContactName:(NSString *)userName;
 @end
 
 @interface SettingUtil : NSObject
@@ -131,7 +132,7 @@ static NSString *createTodoSessionOnMain(void) {
             Class contactCls = NSClassFromString(@"CContact");
             if (contactCls) {
                 if ([contactCls instancesRespondToSelector:@selector(initWithContactName:)]) {
-                    contact = [[contactCls alloc] initWithContactName:kAITodoChatId];
+                    contact = [(CContact *)[contactCls alloc] initWithContactName:kAITodoChatId];
                 } else {
                     contact = [[contactCls alloc] init];
                 }
@@ -202,8 +203,11 @@ static NSString *createTodoSessionOnMain(void) {
             if (typeOK) {
                 BOOL contains = NO;
                 for (id s in normal) {
-                    if ([s respondsToSelector:@selector(m_nsUserName)] &&
-                        [[s m_nsUserName] isEqualToString:kAITodoChatId]) {
+                    NSString *uname = nil;
+                    @try {
+                        uname = [s valueForKey:@"m_nsUserName"];
+                    } @catch (NSException *e) {}
+                    if ([uname isEqualToString:kAITodoChatId]) {
                         contains = YES;
                         break;
                     }
