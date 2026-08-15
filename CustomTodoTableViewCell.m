@@ -228,13 +228,13 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
     CGFloat mainH = 64;
-    CGFloat cardX = 68;
+    CGFloat cardX = 16;
     CGFloat cardW = w - cardX - 16;
 
-    // 时间在卡片外左上，单独
-    _timeLabel.frame = CGRectMake(16, 6, 44, 16);
+    // 时间在行内左上，卡片在下面
+    _timeLabel.frame = CGRectMake(16, 4, 120, 16);
 
-    _cardView.frame = CGRectMake(cardX, 4, cardW, mainH);
+    _cardView.frame = CGRectMake(cardX, 24, cardW, mainH);
     _bookmarkStrip.frame = CGRectMake(0, 0, cardW, 4);
 
     CGFloat iconSize = 34;
@@ -243,7 +243,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     _plusButton.frame = CGRectMake(cardW - 12 - 38, (mainH - 38) / 2.0, 38, 38);
     _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 60, mainH - 12);
 
-    CGFloat y = 4 + mainH + 4;
+    CGFloat y = 24 + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
         UIImageView *check = (UIImageView *)[row viewWithTag:1];
@@ -286,7 +286,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
     CGFloat subH = 0;
     if (todo.isSelected) {
-        CGFloat cardX = 68, cardRight = 16; // 与 layoutSubviews 保持一致
+        CGFloat cardX = 16, cardRight = 16; // 与 layoutSubviews 保持一致
         CGFloat cardW = width - cardX - cardRight;
         CGFloat labelW = cardW - 14 - 32;
         if (todo.subTasks.count == 0) {
@@ -298,7 +298,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             }
         }
     }
-    return 4 + 64 + 4 + subH + 4;
+    return 4 + 16 + 4 + 64 + 4 + subH + 4;
 }
 
 @end
