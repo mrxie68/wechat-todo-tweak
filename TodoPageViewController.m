@@ -21,6 +21,7 @@ static NSString *todoDateString(double ts) {
 @property (nonatomic, assign) NSInteger segmentIndex;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIView *inputBar;
+@property (nonatomic, strong) UIVisualEffectView *inputBarEffect;
 @property (nonatomic, strong) UITextField *inputField;
 @property (nonatomic, strong) UIButton *addButton;
 @property (nonatomic, strong) UILabel *emptyLabel;
@@ -44,22 +45,20 @@ static NSString *todoDateString(double ts) {
         TodoPageViewController *vc = [[TodoPageViewController alloc] init];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
-        // 兜底白底：即使微信/其它插件把导航栏弄透明，露出来的也是白色而不是黑色
-        nav.view.backgroundColor = [UIColor whiteColor];
+        // 兜底背景：即使其它插件把导航栏弄透明，露出来的也是系统背景而不是黑色
+        nav.view.backgroundColor = [UIColor systemBackgroundColor];
         nav.navigationBar.translucent = NO;
-        nav.navigationBar.barTintColor = [UIColor whiteColor];
+        nav.navigationBar.barTintColor = [UIColor systemBackgroundColor];
         nav.navigationBar.prefersLargeTitles = YES; // 大标题，更像原生 App
         if (@available(iOS 13.0, *)) {
-            // 强制浅色外观：避免微信深色模式下顶部变黑，页面更清爽
-            nav.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
-            vc.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
+            // 跟随系统/微信外观，完美适配深色模式
             UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
             [appearance configureWithOpaqueBackground];
-            appearance.backgroundColor = [UIColor whiteColor];
+            appearance.backgroundColor = [UIColor systemBackgroundColor];
             appearance.shadowColor = [UIColor clearColor];
             appearance.largeTitleTextAttributes = @{
                 NSFontAttributeName: [UIFont boldSystemFontOfSize:30],
-                NSForegroundColorAttributeName: [UIColor blackColor],
+                NSForegroundColorAttributeName: [UIColor labelColor],
             };
             nav.navigationBar.standardAppearance = appearance;
             nav.navigationBar.scrollEdgeAppearance = appearance;
@@ -76,8 +75,8 @@ static NSString *todoDateString(double ts) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"待办事项";
-    // 显式浅灰背景，不随深色模式变黑（参考 ThemeBox 的兜底背景思路）
-    self.view.backgroundColor = [UIColor colorWithRed:0.945 green:0.945 blue:0.957 alpha:1.0];
+    // 系统分组背景：浅色=浅灰，深色=深灰，原生适配
+    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     // 内容从导航栏下方开始，避免和标题栏重叠
     self.edgesForExtendedLayout = UIRectEdgeNone;
 
@@ -173,7 +172,7 @@ static NSString *todoDateString(double ts) {
 
     // 胶囊式分段：待办 / 已完成 / 全部
     self.segmentBar = [[UIView alloc] initWithFrame:CGRectZero];
-    self.segmentBar.backgroundColor = [UIColor whiteColor];
+    self.segmentBar.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
     self.segmentBar.layer.cornerRadius = 18;
     self.segmentBar.layer.shadowColor = [UIColor blackColor].CGColor;
     self.segmentBar.layer.shadowOpacity = 0.04;
@@ -215,7 +214,7 @@ static NSString *todoDateString(double ts) {
 
     // 底部浮动输入栏
     self.inputBar = [[UIView alloc] initWithFrame:CGRectZero];
-    self.inputBar.backgroundColor = [UIColor whiteColor];
+    self.inputBar.backgroundColor = [UIColor clearColor];
     self.inputBar.layer.cornerRadius = 18;
     self.inputBar.layer.shadowColor = [UIColor blackColor].CGColor;
     self.inputBar.layer.shadowOpacity = 0.08;
@@ -223,10 +222,21 @@ static NSString *todoDateString(double ts) {
     self.inputBar.layer.shadowRadius = 8;
     [self.view addSubview:self.inputBar];
 
+    // 系统毛玻璃底（跟随深浅色）
+    if (@available(iOS 13.0, *)) {
+        UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
+        UIVisualEffectView *effectView = [[UIVisualEffectView alloc] initWithEffect:blur];
+        effectView.layer.cornerRadius = 18;
+        effectView.clipsToBounds = YES;
+        effectView.userInteractionEnabled = NO;
+        self.inputBarEffect = effectView;
+        [self.inputBar addSubview:effectView];
+    }
+
     self.inputField = [[UITextField alloc] initWithFrame:CGRectZero];
     self.inputField.placeholder = @"记一条待办…";
     self.inputField.font = [UIFont systemFontOfSize:15];
-    self.inputField.backgroundColor = [UIColor colorWithRed:0.910 green:0.910 blue:0.925 alpha:1.0];
+    self.inputField.backgroundColor = [UIColor systemGray6Color];
     self.inputField.layer.cornerRadius = 18;
     self.inputField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 14, 36)];
     self.inputField.leftViewMode = UITextFieldViewModeAlways;
@@ -297,6 +307,7 @@ static NSString *todoDateString(double ts) {
     CGFloat barContentH = 54;
     CGFloat barBottom = b.size.height - self.keyboardInset - (self.keyboardInset > 0 ? 10 : sa.bottom + 8);
     self.inputBar.frame = CGRectMake(16, barBottom - barContentH, b.size.width - 32, barContentH);
+    self.inputBarEffect.frame = self.inputBar.bounds;
 
     CGFloat fieldH = 36;
     CGFloat fieldY = (barContentH - fieldH) / 2.0;
@@ -418,7 +429,7 @@ static NSString *todoDateString(double ts) {
         BOOL sel = (b.tag == self.segmentIndex);
         b.backgroundColor = sel ? [UIColor systemGreenColor] : [UIColor clearColor];
         [b setTitleColor:sel ? [UIColor whiteColor]
-                            : [UIColor colorWithRed:0.35 green:0.35 blue:0.38 alpha:1.0]
+                            : [UIColor secondaryLabelColor]
                 forState:UIControlStateNormal];
         b.layer.cornerRadius = (h - 6) / 2.0;
         b.clipsToBounds = YES;
@@ -593,10 +604,6 @@ static NSString *todoDateString(double ts) {
 
 - (void)closeTapped {
     [self dismissViewControllerAnimated:YES completion:nil];
-}
-
-- (UIStatusBarStyle)preferredStatusBarStyle {
-    return UIStatusBarStyleDarkContent; // 白底上用深色状态栏文字
 }
 
 #pragma mark - 键盘

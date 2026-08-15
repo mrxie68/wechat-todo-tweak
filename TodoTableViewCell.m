@@ -6,7 +6,7 @@
               reuseIdentifier:(NSString *)reuseIdentifier {
     self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
     if (self) {
-        self.backgroundColor = [UIColor whiteColor];
+        self.backgroundColor = [UIColor systemBackgroundColor];
         self.selectionStyle = UITableViewCellSelectionStyleDefault;
 
         _checkButton = [UIButton buttonWithType:UIButtonTypeSystem];

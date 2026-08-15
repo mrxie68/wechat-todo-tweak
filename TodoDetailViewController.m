@@ -36,7 +36,7 @@ static NSString *todoDetailDateString(double ts) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"待办详情";
-    self.view.backgroundColor = [UIColor colorWithRed:0.945 green:0.945 blue:0.957 alpha:1.0];
+    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.edgesForExtendedLayout = UIRectEdgeNone;
 
     self.navigationItem.leftBarButtonItem =
@@ -128,7 +128,7 @@ static NSString *todoDetailDateString(double ts) {
     [deleteBtn setTitle:@"删除这条待办" forState:UIControlStateNormal];
     [deleteBtn setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
     deleteBtn.titleLabel.font = [UIFont systemFontOfSize:16];
-    deleteBtn.backgroundColor = [UIColor whiteColor];
+    deleteBtn.backgroundColor = [UIColor systemBackgroundColor];
     deleteBtn.layer.cornerRadius = 12;
     [deleteBtn addTarget:self action:@selector(deleteTapped) forControlEvents:UIControlEventTouchUpInside];
     deleteBtn.tag = 106;
@@ -148,7 +148,8 @@ static NSString *todoDetailDateString(double ts) {
 - (UITextView *)makeTextView {
     UITextView *v = [[UITextView alloc] initWithFrame:CGRectZero];
     v.font = [UIFont systemFontOfSize:15];
-    v.backgroundColor = [UIColor whiteColor];
+    v.backgroundColor = [UIColor systemBackgroundColor];
+    v.textColor = [UIColor labelColor];
     v.layer.cornerRadius = 12;
     v.textContainerInset = UIEdgeInsetsMake(10, 8, 10, 8);
     return v;
@@ -156,14 +157,14 @@ static NSString *todoDetailDateString(double ts) {
 
 - (UIView *)makeRowView {
     UIView *v = [[UIView alloc] initWithFrame:CGRectZero];
-    v.backgroundColor = [UIColor whiteColor];
+    v.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
     v.layer.cornerRadius = 12;
     return v;
 }
 
 - (UIButton *)makeRowButton {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
-    b.backgroundColor = [UIColor whiteColor];
+    b.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
     b.layer.cornerRadius = 12;
     return b;
 }
