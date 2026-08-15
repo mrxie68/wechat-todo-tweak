@@ -339,7 +339,7 @@ static void runTodoContactCleanupOnce(void) {
     });
 }
 
-#pragma mark - 底部菜单加“待办”tab（第 5 个）
+#pragma mark - 底部菜单加“待办”tab
 
 static UIWindow *g_todoWindow = nil;
 static UIView *g_todoTabContainer = nil;
@@ -389,50 +389,90 @@ static UIView *findBottomTabContainer(UIWindow *window) {
     return nil;
 }
 
-// 判断视图是否占据“tab 项槽位”（x≈i*1/4、宽≈1/4、在 tab 栏内容区），返回槽位号 0-3，否则 -1
-static NSInteger tabSlotForView(UIView *s, UIView *container) {
-    CGFloat cw = container.bounds.size.width;
-    if (cw <= 0) return -1;
-    CGRect f = s.frame;
-    if (f.size.height < 30 || f.origin.y < 0) return -1;
-    if (f.size.width < cw / 8.0 || f.size.width > cw / 2.5) return -1;
-    for (NSInteger i = 0; i < 4; i++) {
-        CGFloat expect = i * cw / 4.0;
-        if (fabs(f.origin.x - expect) <= cw * 0.06) return i;
+// 按类名收集 tab 栏子视图（按 x 排序）
+static NSArray *viewsWithName(UIView *container, NSString *keyword) {
+    NSMutableArray *arr = [NSMutableArray array];
+    for (UIView *s in container.subviews) {
+        NSString *cls = NSStringFromClass([s class]);
+        if ([cls rangeOfString:keyword].location != NSNotFound) {
+            [arr addObject:s];
+        }
     }
-    return -1;
+    [arr sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+        if (a.frame.origin.x < b.frame.origin.x) return NSOrderedAscending;
+        if (a.frame.origin.x > b.frame.origin.x) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+    return arr;
 }
 
-// 把 4 个原 tab 项（内容视图 MMTabBarItemView + 按钮 UITabBarButton 等）缩到各 1/5，给第 5 个让位
-static void shrinkExistingTabItems(UIView *container) {
+// 识别 tab 数量：优先按钮数（UITabBarButton），其次内容视图（MMTabBarItemView），最后按帧宽等分推算
+static NSUInteger detectTabCount(UIView *container) {
+    if (!container) return 0;
+    NSArray *buttons = viewsWithName(container, @"TabBarButton");
+    if (buttons.count >= 3 && buttons.count <= 5) return buttons.count;
+    NSArray *items = viewsWithName(container, @"TabBarItem");
+    if (items.count >= 3 && items.count <= 5) return items.count;
     CGFloat cw = container.bounds.size.width;
-    if (cw <= 0) return;
-    NSArray *subs = [container.subviews copy];
-    for (UIView *s in subs) {
-        if (s == g_todoTabItemView) continue;
-        NSInteger slot = tabSlotForView(s, container);
-        if (slot < 0) continue;
+    if (cw <= 0) return 0;
+    for (UIView *s in container.subviews) {
         CGRect f = s.frame;
-        f.origin.x = slot * cw / 5.0;
-        f.size.width = cw / 5.0;
-        s.frame = f;
+        if (f.size.width > cw / 8.0 && f.size.width < cw / 2.5 &&
+            f.size.height >= 30 && f.origin.y >= 0) {
+            NSUInteger n = (NSUInteger)(cw / f.size.width + 0.5);
+            if (n >= 3 && n <= 5) return n;
+        }
     }
+    return 0;
 }
 
-// 重排：微信每次布局后调它，恢复缩窄 + 待办 tab 归位
+// 重排：现有 tab 项按 N+1 等分缩窄，待办 tab 占最后一位；微信每次布局后会自动恢复
 static void relayoutTodoTabItems(void) {
     UIView *container = g_todoTabContainer;
     if (!container) return;
     CGFloat cw = container.bounds.size.width;
     if (cw <= 0) return;
-    shrinkExistingTabItems(container);
+
+    NSArray *buttons = viewsWithName(container, @"TabBarButton");
+    NSArray *items = viewsWithName(container, @"TabBarItem");
+    NSUInteger N = detectTabCount(container);
+    if (N < 3) return;
+    CGFloat slotW = cw / (N + 1.0);
+
+    if (buttons.count == N) {
+        for (NSUInteger i = 0; i < N; i++) {
+            UIView *b = buttons[i];
+            CGRect f = b.frame;
+            f.origin.x = i * slotW;
+            f.size.width = slotW;
+            b.frame = f;
+        }
+    }
+    if (items.count == N) {
+        // 内容视图就近对齐到对应按钮槽位（新版微信图标相对按钮有偏移）
+        for (UIView *it in items) {
+            CGFloat center = it.frame.origin.x + it.frame.size.width / 2.0;
+            NSInteger best = 0;
+            CGFloat bestDist = CGFLOAT_MAX;
+            for (NSUInteger i = 0; i < buttons.count; i++) {
+                UIView *b = buttons[i];
+                CGFloat bcenter = b.frame.origin.x + b.frame.size.width / 2.0;
+                CGFloat d = fabs(center - bcenter);
+                if (d < bestDist) { bestDist = d; best = (NSInteger)i; }
+            }
+            CGRect f = it.frame;
+            f.origin.x = best * slotW;
+            f.size.width = slotW;
+            it.frame = f;
+        }
+    }
     if (g_todoTabItemView) {
         if (g_todoTabItemView.superview != container) {
             [container addSubview:g_todoTabItemView]; // 微信重建子视图后补回来
         }
         CGRect f = g_todoTabItemView.frame;
-        f.origin.x = 4 * cw / 5.0;
-        f.size.width = cw / 5.0;
+        f.origin.x = N * slotW;
+        f.size.width = slotW;
         g_todoTabItemView.frame = f;
         [container bringSubviewToFront:g_todoTabItemView];
     }
@@ -463,15 +503,16 @@ static TodoTabTarget *g_todoTabTarget = nil;
 
 @end
 
-// 生成“待办”tab 项视图（仿 MMTabBarItemView：28pt 图标 + 底部 12pt 文字）
+// 生成“待办”tab 项视图（仿 MMTabBarItemView：图标 + 文字）
 static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     UIView *item = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
     item.userInteractionEnabled = YES;
 
-    CGFloat iconSize = 28.0;
-    CGFloat iconY = 8.0;
+    // 新版本 tab 栏高度可能到 90pt：内容集中在上半部分，仿原生图标+文字比例
+    CGFloat contentTop = MAX(6.0, (height - 55.0) / 2.0 + 6.0);
+    CGFloat iconSize = 30.0;
     UIImageView *iv = [[UIImageView alloc]
-                       initWithFrame:CGRectMake((width - iconSize) / 2.0, iconY, iconSize, iconSize)];
+                       initWithFrame:CGRectMake((width - iconSize) / 2.0, contentTop, iconSize, iconSize)];
     iv.contentMode = UIViewContentModeScaleAspectFit;
     UIImage *icon = [UIImage systemImageNamed:@"checklist"];
     if (icon) {
@@ -482,7 +523,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     iv.tintColor = [UIColor systemGrayColor];
     [item addSubview:iv];
 
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, height - 17, width, 12)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, contentTop + iconSize + 4, width, 14)];
     label.text = @"待办";
     label.font = [UIFont systemFontOfSize:10];
     label.textColor = [UIColor systemGrayColor];
@@ -496,7 +537,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     return item;
 }
 
-// 结构匹配才加：容器 + 4 个 tab 项槽位存在，否则静默跳过（诊断里能看到原因）
+// 结构匹配才加：容器 + tab 项存在，否则静默跳过（诊断里能看到原因）
 static void installTodoTabItem(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_todoTabItemView) return;
@@ -506,28 +547,26 @@ static void installTodoTabItem(void) {
         if (!container) return;
         g_todoWindow = window;
 
-        // 先确认有 4 个 tab 项槽位（防止误判其它视图）
-        NSInteger slotCount = 0;
-        for (UIView *s in container.subviews) {
-            if (s == g_todoTabItemView) continue;
-            if (tabSlotForView(s, container) >= 0) slotCount++;
-        }
-        if (slotCount < 4) return;
+        // 先确认 tab 数量（3 或 4 个，防止误判其它视图）
+        NSUInteger tabCount = detectTabCount(container);
+        if (tabCount < 3) return;
 
         if (!g_todoTabTarget) {
             g_todoTabTarget = [[TodoTabTarget alloc] init];
         }
-        CGFloat newW = container.bounds.size.width / 5.0;
+        CGFloat newW = container.bounds.size.width / (tabCount + 1.0);
         CGFloat itemY = 0, itemH = 55.0;
         for (UIView *s in container.subviews) {
-            if (tabSlotForView(s, container) >= 0) {
+            NSString *cls = NSStringFromClass([s class]);
+            if ([cls rangeOfString:@"TabBarItem"].location != NSNotFound ||
+                [cls rangeOfString:@"TabBarButton"].location != NSNotFound) {
                 itemY = s.frame.origin.y;
                 itemH = s.frame.size.height;
                 break;
             }
         }
         g_todoTabItemView = makeTodoTabItemView(newW, itemH);
-        g_todoTabItemView.frame = CGRectMake(4 * newW, itemY, newW, itemH);
+        g_todoTabItemView.frame = CGRectMake(tabCount * newW, itemY, newW, itemH);
         [container addSubview:g_todoTabItemView];
         g_todoTabContainer = container;
         relayoutTodoTabItems();
@@ -542,8 +581,8 @@ static void installTodoTabItem(void) {
                 g_tabSwizzled = YES;
             }
         }
-        diagLog(@"底部菜单已加第5个tab（容器=%@ 槽位=%ld）",
-                NSStringFromClass(cls), (long)slotCount);
+        diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
+                NSStringFromClass(cls), (unsigned long)tabCount);
     });
 }
 
@@ -561,7 +600,7 @@ NSString *todoTabDiagnostic(void) {
     [s appendFormat:@"主窗口: %@\n", win ? NSStringFromClass([win class]) : @"无"];
     UIView *container = findBottomTabContainer(win);
     [s appendFormat:@"tab 容器: %@\n", container ? NSStringFromClass([container class]) : @"未找到"];
-    [s appendFormat:@"第5个tab已加: %@\n", g_todoTabItemView ? @"是" : @"否"];
+    [s appendFormat:@"待办tab已加: %@\n", g_todoTabItemView ? @"是" : @"否"];
     @synchronized (g_diagLock) {
         [s appendString:@"\n事件日志（最近40条）:\n"];
         for (NSString *e in g_diagEvents) {
@@ -610,19 +649,20 @@ static NSString *todoTabBarProbe(void) {
     UIView *container = findBottomTabContainer(win);
     [s appendFormat:@"tab 容器: %@\n", container ? NSStringFromClass([container class]) : @"未找到"];
     if (container) {
-        NSInteger slotCount = 0;
-        for (UIView *it in container.subviews) {
-            if (it == g_todoTabItemView) continue;
-            if (tabSlotForView(it, container) >= 0) slotCount++;
+        NSArray *buttons = viewsWithName(container, @"TabBarButton");
+        NSArray *items = viewsWithName(container, @"TabBarItem");
+        [s appendFormat:@"tab 数量: %lu（按钮%lu / 内容视图%lu）\n",
+         (unsigned long)detectTabCount(container),
+         (unsigned long)buttons.count, (unsigned long)items.count];
+        for (UIView *it in buttons) {
+            [s appendFormat:@"  [按钮] %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
+             NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
+             it.frame.size.width, it.frame.size.height];
         }
-        [s appendFormat:@"tab 槽位视图: %ld 个\n", (long)slotCount];
-        for (UIView *it in container.subviews) {
-            if (it == g_todoTabItemView) continue;
-            if (tabSlotForView(it, container) >= 0) {
-                [s appendFormat:@"  %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
-                 NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
-                 it.frame.size.width, it.frame.size.height];
-            }
+        for (UIView *it in items) {
+            [s appendFormat:@"  [内容] %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
+             NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
+             it.frame.size.width, it.frame.size.height];
         }
     }
     // 兜底：不依赖类名，按位置找底部条（防止 tab 栏类名和猜测不一致）
