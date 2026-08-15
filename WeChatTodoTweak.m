@@ -56,6 +56,8 @@
 - (void)insertContact:(id)contact;
 - (id)getContactByName:(NSString *)userName;
 - (void)setContact:(id)contact nickName:(NSString *)nickName;
+- (void)setContact:(id)contact remark:(NSString *)remark isLocal:(BOOL)isLocal;
+- (void)startModifyContactUserName:(NSString *)userName remark:(NSString *)remark;
 @end
 
 @interface CContact : NSObject
@@ -299,6 +301,12 @@ static NSString *createTodoSessionOnMain(void) {
                         }
                         if ([contactMgr respondsToSelector:@selector(setContact:nickName:)]) {
                             [contactMgr setContact:existing nickName:kAITodoNickName];
+                        }
+                        if ([contactMgr respondsToSelector:@selector(setContact:remark:isLocal:)]) {
+                            [contactMgr setContact:existing remark:kAITodoNickName isLocal:YES];
+                        }
+                        if ([contactMgr respondsToSelector:@selector(startModifyContactUserName:remark:)]) {
+                            [contactMgr startModifyContactUserName:kAITodoChatId remark:kAITodoNickName];
                         }
                         if ([existing respondsToSelector:@selector(setM_nsRemark:)]) {
                             [existing setM_nsRemark:kAITodoNickName];
@@ -1366,6 +1374,46 @@ static void WeChatTodoInit(void) {
                                                   usingBlock:^(NSNotification *note) {
         retryInstall(10);
         registerWithWCPlugins(10);
+        // 启动后自动重新应用待办联系人修复（好友标记+昵称+备注），解决重启后失效
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)),
+                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            Class centerCls = NSClassFromString(@"MMServiceCenter");
+            id center = centerCls ? [(id)centerCls defaultCenter] : nil;
+            id contactMgr = center ? [center getService:NSClassFromString(@"CContactMgr")] : nil;
+            if (!contactMgr || ![contactMgr respondsToSelector:@selector(getContactByName:)]) return;
+            id contact = [contactMgr getContactByName:kAITodoChatId];
+            if (!contact) return; // 还没创建过待办会话就跳过
+            @try {
+                if ([contact respondsToSelector:@selector(setM_nsNickName:)]) {
+                    [contact setM_nsNickName:kAITodoNickName];
+                }
+                if ([contact respondsToSelector:@selector(setM_nsRemark:)]) {
+                    [contact setM_nsRemark:kAITodoNickName];
+                }
+                NSNumber *type = [contact valueForKey:@"m_uiType"];
+                unsigned int t = type ? type.unsignedIntValue : 0;
+                [contact setValue:@(t | 1) forKey:@"m_uiType"];
+                [contact setValue:@NO forKey:@"m_bNeedContactVerify"];
+                if ([contactMgr respondsToSelector:@selector(setContact:nickName:)]) {
+                    [contactMgr setContact:contact nickName:kAITodoNickName];
+                }
+                if ([contactMgr respondsToSelector:@selector(setContact:remark:isLocal:)]) {
+                    [contactMgr setContact:contact remark:kAITodoNickName isLocal:YES];
+                }
+                if ([contactMgr respondsToSelector:@selector(startModifyContactUserName:remark:)]) {
+                    [contactMgr startModifyContactUserName:kAITodoChatId remark:kAITodoNickName];
+                }
+                NSLog(kAITodoLogPrefix "已自动修复待办联系人（好友标记+昵称）");
+            } @catch (NSException *e) {}
+            dispatch_async(dispatch_get_main_queue(), ^{
+                Class mainMgrCls = NSClassFromString(@"MainSessionMgr");
+                id mainMgr = mainMgrCls ? [center getService:mainMgrCls] : nil;
+                if ([mainMgr respondsToSelector:@selector(updateMainSessionList)]) {
+                    [mainMgr updateMainSessionList];
+                }
+                (void)reloadMainFrameTable();
+            });
+        });
     }];
 
     retryInstall(10);
