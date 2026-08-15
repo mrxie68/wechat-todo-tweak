@@ -170,6 +170,7 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 + (NSString *)todoSessionDiagnostic;
 + (NSString *)createTodoSessionDiagnostic;
 + (NSString *)removeTodoSessionDiagnostic;
++ (NSString *)uiProbeDiagnostic;
 @end
 
 @implementation WeChatTodoHandler
@@ -500,6 +501,67 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     }
     return [NSString stringWithFormat:@"未找到当前账号的 SessionTable（session.db）\n%@",
             [notes componentsJoinedByString:@"\n"]];
+}
+
++ (NSString *)uiProbeDiagnostic {
+    NSMutableArray *lines = [NSMutableArray array];
+
+    // 1. 已加载类里找主界面/会话管理候选
+    int classCount = objc_getClassList(NULL, 0);
+    Class *classes = NULL;
+    if (classCount > 0) {
+        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
+        objc_getClassList(classes, classCount);
+    }
+    for (int i = 0; i < classCount; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name rangeOfString:@"MainFrame"].location != NSNotFound) {
+            [lines addObject:[NSString stringWithFormat:@"主界面类: %@", name]];
+        } else if ([name rangeOfString:@"SessionMgr"].location != NSNotFound) {
+            [lines addObject:[NSString stringWithFormat:@"会话管理: %@", name]];
+        }
+    }
+    free(classes);
+
+    // 2. ChatViewController 是否存在 + 常见初始化 selector
+    Class chatCls = NSClassFromString(@"ChatViewController");
+    if (chatCls) {
+        [lines addObject:@"ChatViewController 存在"];
+        NSArray *sels = @[@"initWithContactName:", @"setContactName:", @"setUserName:",
+                          @"initWithUserName:", @"initWithChatRoomName:", @"initWithChatName:"];
+        for (NSString *s in sels) {
+            if ([chatCls instancesRespondToSelector:NSSelectorFromString(s)]) {
+                [lines addObject:[@"  ✔ " stringByAppendingString:s]];
+            }
+        }
+    } else {
+        [lines addObject:@"ChatViewController 未加载（可能需先打开任意聊天）"];
+    }
+
+    // 3. 会话管理类的方法（含 session/add/create/insert）
+    for (NSString *cn in @[@"MMSessionMgr", @"MMNewSessionMgr"]) {
+        Class cls = NSClassFromString(cn);
+        if (!cls) continue;
+        [lines addObject:[NSString stringWithFormat:@"%@ 方法:", cn]];
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(cls, &count);
+        int shown = 0;
+        for (unsigned int i = 0; i < count && shown < 25; i++) {
+            NSString *sel = NSStringFromSelector(method_getName(methods[i]));
+            BOOL hit = [sel rangeOfString:@"session" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                       [sel hasPrefix:@"add"] || [sel hasPrefix:@"create"] || [sel hasPrefix:@"insert"];
+            if (hit) {
+                [lines addObject:[@"  " stringByAppendingString:sel]];
+                shown++;
+            }
+        }
+        free(methods);
+    }
+
+    NSString *full = [lines componentsJoinedByString:@"\n"];
+    if (full.length == 0) return @"未找到相关类（可能类未加载）";
+    if (full.length > 2500) full = [full substringToIndex:2500];
+    return full;
 }
 
 @end

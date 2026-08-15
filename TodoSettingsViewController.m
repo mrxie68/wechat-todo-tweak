@@ -8,6 +8,7 @@
 + (NSString *)todoSessionDiagnostic;
 + (NSString *)createTodoSessionDiagnostic;
 + (NSString *)removeTodoSessionDiagnostic;
++ (NSString *)uiProbeDiagnostic;
 @end
 
 @interface TodoSettingsViewController () <UITextFieldDelegate>
@@ -166,6 +167,12 @@
     [self.contentView addSubview:removeWriteBtn];
     y += 44 + 12;
 
+    UIButton *uiProbeBtn = [self makeButton:@"🔍 UI 插行探测（只读）"];
+    uiProbeBtn.frame = CGRectMake(x, y, cardW, 44);
+    [uiProbeBtn addTarget:self action:@selector(uiProbeTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:uiProbeBtn];
+    y += 44 + 12;
+
     UILabel *versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, y, w, 24)];
     versionLabel.text = [NSString stringWithFormat:@"待办插件 v%@", kAITodoVersion];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -312,6 +319,27 @@
             NSString *shortText = [self consumeDiagnostic:diag];
             [progress dismissViewControllerAnimated:NO completion:^{
                 UIAlertController *r = [UIAlertController alertControllerWithTitle:@"结果"
+                                                                           message:shortText
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:r animated:YES completion:nil];
+            }];
+        });
+    });
+}
+
+- (void)uiProbeTapped {
+    [self.view endEditing:YES];
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"正在探测"
+                                                                     message:@"正在读取微信界面类信息…\n\n"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:progress animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *diag = [WeChatTodoHandler uiProbeDiagnostic];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *shortText = [self consumeDiagnostic:diag];
+            [progress dismissViewControllerAnimated:NO completion:^{
+                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"UI 探测结果"
                                                                            message:shortText
                                                                     preferredStyle:UIAlertControllerStyleAlert];
                 [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
