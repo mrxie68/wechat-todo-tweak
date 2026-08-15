@@ -1,6 +1,7 @@
 #import "CustomCalendarTodoViewController.h"
 #import "CustomTodoTableViewCell.h"
 #import "AITodoManager.h"
+#import "AISettings.h"
 #import "AIConfig.h"
 
 #pragma mark - 日历日期 Cell
@@ -118,8 +119,10 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-    self.selectedDay = [NSDate date];
-    self.currentMonth = [NSDate date];
+    // 恢复上次选中的日期，避免退出重进后默认回到“今天”而看不到之前那天的待办
+    double saved = [[NSUserDefaults standardUserDefaults] doubleForKey:[self selectedDayKey]];
+    self.selectedDay = saved > 0 ? [NSDate dateWithTimeIntervalSince1970:saved] : [NSDate date];
+    self.currentMonth = self.selectedDay;
     self.expandedIds = [NSMutableSet set];
 
     [self buildTopBar];
@@ -271,6 +274,20 @@
     NSDateComponents *c = [cal components:(NSCalendarUnitYear | NSCalendarUnitMonth) fromDate:self.currentMonth];
     c.day = dayNum;
     self.selectedDay = [cal dateFromComponents:c];
+    [self saveSelectedDay];
+}
+
+- (NSString *)selectedDayKey {
+    NSString *acc = [AISettings currentAccount];
+    if (acc.length == 0) return @"WeChatTodoLastSelectedDay";
+    return [@"WeChatTodoLastSelectedDay_" stringByAppendingString:acc];
+}
+
+- (void)saveSelectedDay {
+    NSDate *start = [[NSCalendar currentCalendar] startOfDayForDate:self.selectedDay];
+    [[NSUserDefaults standardUserDefaults] setDouble:[start timeIntervalSince1970]
+                                             forKey:[self selectedDayKey]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 - (void)scrollToSelectedDayAnimated:(BOOL)animated {
@@ -543,6 +560,7 @@
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     self.selectedDay = self.days[indexPath.row];
     self.currentMonth = self.selectedDay;
+    [self saveSelectedDay];
     [self.calendarView reloadData];
     [self updateMonthLabel];
     [self reloadList];

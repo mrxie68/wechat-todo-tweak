@@ -67,6 +67,7 @@ static UIColor *cardSelectedColor(void) {
         [self.cardView addGestureRecognizer:self.cardTapGesture];
         self.cardLongPressGesture =
             [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(cardLongPressed:)];
+        self.cardLongPressGesture.minimumPressDuration = 0.35;
         self.cardLongPressGesture.delegate = self;
         [self.cardView addGestureRecognizer:self.cardLongPressGesture];
 
@@ -132,10 +133,6 @@ static UIColor *cardSelectedColor(void) {
     if (todo.isSelected) {
         for (SubTaskItem *sub in todo.subTasks) {
             UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
-            row.backgroundColor = todo.isSelected
-                ? [UIColor colorWithWhite:1.0 alpha:0.16]
-                : [UIColor colorWithWhite:1.0 alpha:0.55];
-            row.layer.cornerRadius = 8;
             [self.cardView addSubview:row];
             UIButton *check = [UIButton buttonWithType:UIButtonTypeSystem];
             check.tag = 1;
@@ -144,6 +141,7 @@ static UIColor *cardSelectedColor(void) {
             UILongPressGestureRecognizer *rowLongPress =
                 [[UILongPressGestureRecognizer alloc] initWithTarget:self
                                                               action:@selector(subRowLongPressed:)];
+            rowLongPress.minimumPressDuration = 0.35;
             rowLongPress.delegate = self;
             [row addGestureRecognizer:rowLongPress];
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -217,11 +215,11 @@ static UIColor *cardSelectedColor(void) {
     CGFloat y = mainH;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
-        row.frame = CGRectMake(10, y + 4, cardW - 20, 34);
+        row.frame = CGRectMake(0, y, cardW, 34);
         UIButton *check = [row viewWithTag:1];
         UILabel *label = [row viewWithTag:2];
-        check.frame = CGRectMake(8, 6, 24, 24);
-        label.frame = CGRectMake(40, 0, row.bounds.size.width - 48, 34);
+        check.frame = CGRectMake(14, 6, 24, 24);
+        label.frame = CGRectMake(44, 0, cardW - 44 - 34, 34);
 
         SubTaskItem *sub = (i < _todo.subTasks.count) ? _todo.subTasks[i] : nil;
         if (sub) {
@@ -243,13 +241,13 @@ static UIColor *cardSelectedColor(void) {
                 label.textColor = _todo.isSelected ? [UIColor whiteColor] : [UIColor labelColor];
             }
         }
-        y += 38;
+        y += 34;
     }
 }
 
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
     CGFloat mainH = 64;
-    CGFloat subH = todo.isSelected ? todo.subTasks.count * 38.0 : 0;
+    CGFloat subH = todo.isSelected ? todo.subTasks.count * 34.0 : 0;
     return mainH + subH + 8;
 }
 
