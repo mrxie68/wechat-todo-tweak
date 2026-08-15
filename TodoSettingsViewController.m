@@ -12,11 +12,53 @@ extern NSString *todoTabDiagnostic(void); // 由 WeChatTodoTweak.m 提供
 @property (nonatomic, strong) UITextField *urlField;
 @property (nonatomic, strong) UITextField *tokenField;
 @property (nonatomic, strong) UISegmentedControl *visibilityControl;
+@property (nonatomic, assign) BOOL savedBarTranslucent;
+@property (nonatomic, strong) UIColor *savedBarTint;
+@property (nonatomic, assign) UIBarStyle savedBarStyle;
+@property (nonatomic, strong) UINavigationBarAppearance *savedStandardAppearance;
+@property (nonatomic, strong) UINavigationBarAppearance *savedScrollEdgeAppearance;
 @end
 
 static void todoAlert(NSString *msg); // 前向声明
 
 @implementation TodoSettingsViewController
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    // 设置页在微信导航栏里打开时，强制当前导航栏不透明白，避免被主题插件透明化后露黑
+    UINavigationBar *bar = self.navigationController.navigationBar;
+    if (!bar) return;
+    self.savedBarTranslucent = bar.translucent;
+    self.savedBarTint = bar.barTintColor;
+    self.savedBarStyle = bar.barStyle;
+    if (@available(iOS 13.0, *)) {
+        self.savedStandardAppearance = bar.standardAppearance;
+        self.savedScrollEdgeAppearance = bar.scrollEdgeAppearance;
+        UINavigationBarAppearance *app = [[UINavigationBarAppearance alloc] init];
+        [app configureWithOpaqueBackground];
+        app.backgroundColor = [UIColor whiteColor];
+        app.shadowColor = [UIColor clearColor];
+        bar.standardAppearance = app;
+        bar.scrollEdgeAppearance = app;
+        bar.compactAppearance = app;
+    }
+    bar.translucent = NO;
+    bar.barTintColor = [UIColor whiteColor];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    UINavigationBar *bar = self.navigationController.navigationBar;
+    if (!bar) return;
+    bar.translucent = self.savedBarTranslucent;
+    bar.barTintColor = self.savedBarTint;
+    bar.barStyle = self.savedBarStyle;
+    if (@available(iOS 13.0, *)) {
+        bar.standardAppearance = self.savedStandardAppearance;
+        bar.scrollEdgeAppearance = self.savedScrollEdgeAppearance;
+        bar.compactAppearance = nil;
+    }
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];

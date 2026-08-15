@@ -344,6 +344,8 @@ static void runTodoContactCleanupOnce(void) {
 static UIWindow *g_todoWindow = nil;
 static UIView *g_todoTabContainer = nil;
 static UIView *g_todoTabItemView = nil;
+static UIImageView *g_todoTabIcon = nil;
+static UILabel *g_todoTabLabel = nil;
 static BOOL g_tabSwizzled = NO;
 static BOOL g_inTabRelayout = NO;
 static void (*orig_tabLayoutSubviews)(id, SEL);
@@ -496,8 +498,42 @@ static TodoTabTarget *g_todoTabTarget = nil;
 
 @implementation TodoTabTarget
 
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(pageAppeared)
+                                                     name:kWeChatTodoPageAppearNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(pageDisappeared)
+                                                     name:kWeChatTodoPageDisappearNotification
+                                                   object:nil];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)setSelected:(BOOL)selected {
+    UIColor *c = selected ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
+    if (g_todoTabIcon) g_todoTabIcon.tintColor = c;
+    if (g_todoTabLabel) g_todoTabLabel.textColor = c;
+}
+
+- (void)pageAppeared {
+    [self setSelected:YES];
+}
+
+- (void)pageDisappeared {
+    [self setSelected:NO];
+}
+
 - (void)todoTabTapped {
     diagLog(@"底部菜单「待办」tab 点击");
+    [self setSelected:YES];
     [TodoPageViewController presentFrom:tweakTopViewController()];
 }
 
@@ -522,6 +558,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     }
     iv.tintColor = [UIColor systemGrayColor];
     [item addSubview:iv];
+    g_todoTabIcon = iv;
 
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, contentTop + iconSize + 4, width, 14)];
     label.text = @"待办";
@@ -529,6 +566,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     label.textColor = [UIColor systemGrayColor];
     label.textAlignment = NSTextAlignmentCenter;
     [item addSubview:label];
+    g_todoTabLabel = label;
 
     UITapGestureRecognizer *tap =
         [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget

@@ -77,6 +77,18 @@ static NSString *todoDateString(double ts) {
     tap.delegate = self;
     [self.view addGestureRecognizer:tap];
 
+    // 左右滑动切换分段：待办 / 已完成 / 全部
+    UISwipeGestureRecognizer *swipeLeft =
+        [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipeLeft)];
+    swipeLeft.direction = UISwipeGestureRecognizerDirectionLeft;
+    swipeLeft.delegate = self;
+    [self.view addGestureRecognizer:swipeLeft];
+    UISwipeGestureRecognizer *swipeRight =
+        [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipeRight)];
+    swipeRight.direction = UISwipeGestureRecognizerDirectionRight;
+    swipeRight.delegate = self;
+    [self.view addGestureRecognizer:swipeRight];
+
     // 关闭
     UIImage *down = [UIImage systemImageNamed:@"chevron.down"];
     if (down) {
@@ -183,6 +195,14 @@ static NSString *todoDateString(double ts) {
                                              selector:@selector(keyboardWillChange:)
                                                  name:UIKeyboardWillChangeFrameNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillChange:)
+                                                 name:UIKeyboardWillShowNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keyboardWillChange:)
+                                                 name:UIKeyboardWillHideNotification
+                                               object:nil];
 }
 
 - (UILabel *)bigNumberLabel {
@@ -204,7 +224,13 @@ static NSString *todoDateString(double ts) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kWeChatTodoPageAppearNotification object:nil];
     [self reloadItems];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kWeChatTodoPageDisappearNotification object:nil];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -303,6 +329,20 @@ static NSString *todoDateString(double ts) {
     [self reloadItems];
 }
 
+- (void)swipeLeft {
+    if (self.segmentControl.selectedSegmentIndex < 2) {
+        self.segmentControl.selectedSegmentIndex++;
+        [self reloadItems];
+    }
+}
+
+- (void)swipeRight {
+    if (self.segmentControl.selectedSegmentIndex > 0) {
+        self.segmentControl.selectedSegmentIndex--;
+        [self reloadItems];
+    }
+}
+
 #pragma mark - 表格
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -383,6 +423,10 @@ static NSString *todoDateString(double ts) {
     [AITodoManager addTodo:text];
     self.inputField.text = @"";
     [self reloadItems];
+    if (self.filteredTodos.count > 0) {
+        [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]
+                              atScrollPosition:UITableViewScrollPositionTop animated:YES];
+    }
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
@@ -446,12 +490,42 @@ static NSString *todoDateString(double ts) {
 
 - (void)keyboardWillChange:(NSNotification *)note {
     CGRect kbEnd = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    CGRect kbInView = [self.view convertRect:kbEnd fromView:nil];
-    CGFloat covered = self.view.bounds.size.height - CGRectGetMinY(kbInView);
-    self.keyboardInset = MAX(0, covered);
+    CGFloat inset = 0;
+    if (!CGRectIsNull(kbEnd)) {
+        CGRect kbInView = [self.view convertRect:kbEnd fromView:nil];
+        CGRect inter = CGRectIntersection(self.view.bounds, kbInView);
+        inset = MAX(0, inter.size.height);
+    }
+    self.keyboardInset = inset;
+    // 必须先 setNeedsLayout 再 layoutIfNeeded，否则布局不会重跑，输入栏会被键盘挡住
+    [self.view setNeedsLayout];
     [UIView animateWithDuration:0.25 animations:^{
         [self.view layoutIfNeeded];
     }];
+}
+
+- (void)textFieldDidBeginEditing:(UITextField *)textField {
+    // 兜底：万一键盘通知没生效，扫描键盘窗口把输入栏顶起来
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        CGFloat inset = 0;
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            NSString *cls = NSStringFromClass([w class]);
+            if ([cls rangeOfString:@"RemoteKeyboard"].location == NSNotFound &&
+                [cls rangeOfString:@"TextEffects"].location == NSNotFound &&
+                [cls rangeOfString:@"Keyboard"].location == NSNotFound) continue;
+            CGRect inView = [self.view convertRect:w.frame fromView:nil];
+            CGRect inter = CGRectIntersection(self.view.bounds, inView);
+            inset = MAX(inset, inter.size.height);
+        }
+        if (inset > self.keyboardInset) {
+            self.keyboardInset = inset;
+            [self.view setNeedsLayout];
+            [UIView animateWithDuration:0.2 animations:^{
+                [self.view layoutIfNeeded];
+            }];
+        }
+    });
 }
 
 - (void)dismissKeyboard {
@@ -460,6 +534,11 @@ static NSString *todoDateString(double ts) {
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
        shouldReceiveTouch:(UITouch *)touch {
+    if ([gestureRecognizer isKindOfClass:[UISwipeGestureRecognizer class]]) {
+        // 左右滑切换分段：不在列表行上触发，避免和“左滑删除”冲突
+        if ([touch.view isDescendantOfView:self.tableView]) return NO;
+        return YES;
+    }
     // 输入框/按钮上的点击不拦截，其余空白处点击收起键盘
     if ([touch.view isKindOfClass:[UIControl class]] ||
         [touch.view isKindOfClass:[UITextField class]] ||
