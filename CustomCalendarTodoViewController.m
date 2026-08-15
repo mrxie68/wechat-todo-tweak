@@ -368,17 +368,33 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 }
 
 - (void)statsTapped {
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSDate *start = [cal startOfDayForDate:self.selectedDay];
+    NSDate *end = [cal dateByAddingUnit:NSCalendarUnitDay value:1 toDate:start options:0];
+    NSUInteger dayUndone = 0, dayDone = 0;
     NSArray *all = [AITodoManager allTodos];
-    NSUInteger undone = [AITodoManager unfinishedCount];
+    NSUInteger globalUndone = 0;
     NSUInteger bookmarked = 0;
     for (MainTodoItem *m in all) {
+        if (!m.done) globalUndone++;
         if (m.isBookmarked) bookmarked++;
+        if ([m.createTime compare:start] != NSOrderedAscending &&
+            [m.createTime compare:end] == NSOrderedAscending) {
+            if (m.done) dayDone++;
+            else dayUndone++;
+        }
     }
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+    fmt.dateFormat = @"M月d日";
     UIAlertController *al = [UIAlertController alertControllerWithTitle:@"统计"
                                                                 message:[NSString stringWithFormat:
-                                                                         @"全部：%lu\n未完成：%lu\n已书签：%lu",
+                                                                         @"%@（当前所选）\n当日：未完成 %lu · 已完成 %lu\n\n全部：%lu 条（未完成 %lu · 已书签 %lu）",
+                                                                         [fmt stringFromDate:self.selectedDay],
+                                                                         (unsigned long)dayUndone,
+                                                                         (unsigned long)dayDone,
                                                                          (unsigned long)all.count,
-                                                                         (unsigned long)undone,
+                                                                         (unsigned long)globalUndone,
                                                                          (unsigned long)bookmarked]
                                                          preferredStyle:UIAlertControllerStyleAlert];
     [al addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
