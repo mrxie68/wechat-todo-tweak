@@ -115,9 +115,11 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     _iconBg.backgroundColor = todo.isSelected
         ? [UIColor colorWithRed:0.78 green:0.68 blue:0.94 alpha:1.0]
         : [UIColor colorWithRed:0.84 green:0.77 blue:0.95 alpha:1.0];
-    _iconView.tintColor = todo.isSelected
-        ? [UIColor colorWithRed:0.42 green:0.30 blue:0.72 alpha:1.0]
-        : [UIColor colorWithRed:0.45 green:0.34 blue:0.72 alpha:1.0];
+    _iconView.tintColor = todo.done
+        ? [UIColor systemGray3Color]
+        : (todo.isSelected
+           ? [UIColor colorWithRed:0.42 green:0.30 blue:0.72 alpha:1.0]
+           : [UIColor colorWithRed:0.45 green:0.34 blue:0.72 alpha:1.0]);
 
     // 标题
     if (todo.done) {
@@ -142,6 +144,24 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     for (UIView *v in _subRows) [v removeFromSuperview];
     [_subRows removeAllObjects];
     if (todo.isSelected) {
+        if (todo.subTasks.count == 0) {
+            // 空子任务提示行：点它添加子任务
+            UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
+            [self.contentView addSubview:row];
+            UIImageView *check = [[UIImageView alloc] initWithFrame:CGRectZero];
+            check.tag = 1;
+            check.contentMode = UIViewContentModeScaleAspectFit;
+            [row addSubview:check];
+            UITapGestureRecognizer *rowTap =
+                [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(subRowTapped:)];
+            [row addGestureRecognizer:rowTap];
+            UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+            label.tag = 2;
+            label.font = [UIFont systemFontOfSize:13];
+            label.textColor = [UIColor secondaryLabelColor];
+            [row addSubview:label];
+            [_subRows addObject:row];
+        }
         for (SubTaskItem *sub in todo.subTasks) {
             UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
             [self.contentView addSubview:row];
@@ -178,6 +198,8 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     NSUInteger idx = [_subRows indexOfObject:gesture.view];
     if (idx != NSNotFound && idx < _todo.subTasks.count) {
         if (self.onToggleSubTask) self.onToggleSubTask(_todo.subTasks[idx]);
+    } else if (idx != NSNotFound) {
+        if (self.onAddSubTask) self.onAddSubTask(); // 空子任务提示行
     }
 }
 
@@ -251,6 +273,11 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
                 label.text = sub.title;
                 label.textColor = [UIColor labelColor];
             }
+        } else {
+            // 空子任务提示行
+            check.hidden = YES;
+            label.text = @"＋ 添加子任务";
+            label.textColor = [UIColor secondaryLabelColor];
         }
         y += rowH;
     }
@@ -263,9 +290,13 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         CGFloat cardX = 64, cardRight = 12; // 与 layoutSubviews 保持一致
         CGFloat cardW = width - cardX - cardRight;
         CGFloat labelW = cardW - 14 - 32;
-        for (SubTaskItem *s in todo.subTasks) {
-            NSInteger lines = todoSubLines(s.title, labelW);
-            subH += MAX(34, lines * 17 + 14);
+        if (todo.subTasks.count == 0) {
+            subH += 34; // 空子任务提示行
+        } else {
+            for (SubTaskItem *s in todo.subTasks) {
+                NSInteger lines = todoSubLines(s.title, labelW);
+                subH += MAX(34, lines * 17 + 14);
+            }
         }
     }
     return 4 + mainH + 4 + subH + 4;

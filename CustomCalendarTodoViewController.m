@@ -100,8 +100,12 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 @property (nonatomic, strong) UIButton *statsButton;
 @property (nonatomic, assign) BOOL bookmarkMode;
 @property (nonatomic, strong) UILabel *listHeaderLabel;
+@property (nonatomic, strong) UIButton *todayButton;
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIView *emptyView;
+@property (nonatomic, strong) UILabel *emptyIconLabel;
 @property (nonatomic, strong) UILabel *emptyLabel;
+@property (nonatomic, strong) UIButton *emptyButton;
 @property (nonatomic, strong) NSArray<MainTodoItem *> *listTodos;
 @property (nonatomic, assign) BOOL didInitialScroll;
 @property (nonatomic, strong) NSSet *daysWithTodos;
@@ -321,6 +325,14 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     self.listHeaderLabel.textColor = [UIColor labelColor];
     [self.view addSubview:self.listHeaderLabel];
 
+    self.todayButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.todayButton setTitle:@"回到今天" forState:UIControlStateNormal];
+    self.todayButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.todayButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
+    [self.todayButton addTarget:self action:@selector(goToToday) forControlEvents:UIControlEventTouchUpInside];
+    self.todayButton.hidden = YES;
+    [self.view addSubview:self.todayButton];
+
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.backgroundColor = [UIColor clearColor];
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
@@ -328,13 +340,30 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     self.tableView.delegate = self;
     [self.view addSubview:self.tableView];
 
+    self.emptyView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.emptyView.hidden = YES;
+    [self.view addSubview:self.emptyView];
+
+    self.emptyIconLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.emptyIconLabel.font = [UIFont systemFontOfSize:40];
+    self.emptyIconLabel.textAlignment = NSTextAlignmentCenter;
+    [self.emptyView addSubview:self.emptyIconLabel];
+
     self.emptyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.emptyLabel.numberOfLines = 0;
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.textColor = [UIColor secondaryLabelColor];
     self.emptyLabel.font = [UIFont systemFontOfSize:14];
-    self.emptyLabel.hidden = YES;
-    [self.view addSubview:self.emptyLabel];
+    [self.emptyView addSubview:self.emptyLabel];
+
+    self.emptyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.emptyButton setTitle:@"添加第一条" forState:UIControlStateNormal];
+    self.emptyButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [self.emptyButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.emptyButton.backgroundColor = kAITodoAccentColor;
+    self.emptyButton.layer.cornerRadius = 20;
+    [self.emptyButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.emptyView addSubview:self.emptyButton];
 }
 
 - (void)reloadList {
@@ -378,10 +407,30 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 
     BOOL empty = (self.listTodos.count == 0);
     self.tableView.hidden = empty;
-    self.emptyLabel.hidden = !empty;
-    self.emptyLabel.text = self.bookmarkMode
-        ? @"还没有书签\n点卡片上的书签图标即可收藏"
-        : @"这一天还没有待办\n点右上角 + 添加一条";
+    self.emptyView.hidden = !empty;
+    if (empty) {
+        if (self.bookmarkMode) {
+            self.emptyIconLabel.text = @"🔖";
+            self.emptyLabel.text = @"还没有书签\n右滑卡片即可收藏";
+            self.emptyButton.hidden = YES;
+        } else {
+            self.emptyIconLabel.text = @"📋";
+            self.emptyLabel.text = @"这一天还没有待办";
+            self.emptyButton.hidden = NO;
+        }
+    }
+    // 非今天且不在书签模式时，显示“回到今天”
+    NSCalendar *cal2 = [NSCalendar currentCalendar];
+    BOOL isToday = [[cal2 startOfDayForDate:self.selectedDay] isEqualToDate:
+                    [cal2 startOfDayForDate:[NSDate date]]];
+    self.todayButton.hidden = self.bookmarkMode || isToday;
+}
+
+- (void)goToToday {
+    self.selectedDay = [NSDate date];
+    self.currentMonth = self.selectedDay;
+    [self rebuildDays];
+    [self reloadList];
 }
 
 - (void)toggleBookmarkMode {
@@ -717,11 +766,16 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     self.statsButton.frame = CGRectMake(cardX + cardW / 2.0, rowY, cardW / 2.0, 30);
 
     CGFloat headerY = rowY + 30 + 8;
-    self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 40, 24);
+    self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 130, 24);
+    self.todayButton.frame = CGRectMake(w - 110, headerY, 90, 24);
 
     CGFloat tableY = headerY + 24 + 4;
     self.tableView.frame = CGRectMake(0, tableY, w, b.size.height - tableY - sa.bottom);
-    self.emptyLabel.frame = CGRectMake(32, tableY + 80, w - 64, 80);
+    CGFloat evW = w - 64;
+    self.emptyView.frame = CGRectMake(32, tableY + 60, evW, 150);
+    self.emptyIconLabel.frame = CGRectMake(0, 0, evW, 48);
+    self.emptyLabel.frame = CGRectMake(0, 52, evW, 44);
+    self.emptyButton.frame = CGRectMake((evW - 140) / 2.0, 106, 140, 40);
 }
 
 @end
