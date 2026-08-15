@@ -2,6 +2,7 @@
 #import "CustomTodoTableViewCell.h"
 #import "AITodoManager.h"
 #import "AISettings.h"
+#import "TodoEditorViewController.h"
 #import "AIConfig.h"
 
 extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
@@ -514,33 +515,16 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     }];
 }
 
-// 多行输入弹窗（新建/编辑待办与子任务共用，不再是一行的小框）
+// 打开 Markdown 编辑页（新建/编辑待办与子任务共用）
 - (void)presentMultilineInputWithTitle:(NSString *)title
                            initialText:(NSString *)initial
                             completion:(void (^)(NSString *text))completion {
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:title
-                                                                message:nil
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    UIViewController *holder = [[UIViewController alloc] init];
-    holder.preferredContentSize = CGSizeMake(270, 130);
-    UITextView *tv = [[UITextView alloc] initWithFrame:CGRectMake(10, 8, 250, 112)];
-    tv.font = [UIFont systemFontOfSize:15];
-    tv.text = initial ?: @"";
-    tv.backgroundColor = [UIColor systemGray6Color];
-    tv.layer.cornerRadius = 8;
-    tv.layer.borderWidth = 0.5;
-    tv.layer.borderColor = [UIColor systemGray4Color].CGColor;
-    [holder.view addSubview:tv];
-    [al setValue:holder forKey:@"contentViewController"];
-    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [al addAction:[UIAlertAction actionWithTitle:@"确定"
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(UIAlertAction *action) {
-        if (completion) completion(tv.text);
-    }]];
-    [self presentViewController:al animated:YES completion:^{
-        [tv becomeFirstResponder];
-    }];
+    TodoEditorViewController *vc = [[TodoEditorViewController alloc] initWithTitle:title
+                                                                      initialText:initial
+                                                                       completion:completion];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 #pragma mark - 日历数据源/代理

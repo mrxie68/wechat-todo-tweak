@@ -1,5 +1,6 @@
 #import "CustomTodoTableViewCell.h"
 #import "AIConfig.h"
+#import "TodoMarkdown.h"
 
 static UIColor *cardUnselectedColor(void) {
     if (@available(iOS 13.0, *)) {
@@ -116,19 +117,18 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         ? [UIColor colorWithRed:0.42 green:0.30 blue:0.72 alpha:1.0]
         : [UIColor colorWithRed:0.45 green:0.34 blue:0.72 alpha:1.0];
 
-    // 标题
+    // 标题（按 Markdown 渲染）
+    NSMutableAttributedString *titleAtt = [todoMarkdownString(todo.title ?: @"", 15) mutableCopy];
     if (todo.done) {
-        _titleLabel.attributedText =
-            [[NSAttributedString alloc] initWithString:todo.title ?: @""
-                                            attributes:@{
-                                                NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle),
-                                                NSForegroundColorAttributeName: [UIColor secondaryLabelColor],
-                                            }];
+        [titleAtt addAttribute:NSStrikethroughStyleAttributeName value:@(NSUnderlineStyleSingle)
+                         range:NSMakeRange(0, titleAtt.length)];
+        [titleAtt addAttribute:NSForegroundColorAttributeName value:[UIColor secondaryLabelColor]
+                         range:NSMakeRange(0, titleAtt.length)];
     } else {
-        _titleLabel.attributedText = nil;
-        _titleLabel.text = todo.title;
-        _titleLabel.textColor = [UIColor labelColor];
+        [titleAtt addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor]
+                         range:NSMakeRange(0, titleAtt.length)];
     }
+    _titleLabel.attributedText = titleAtt;
 
     // 书签
     UIImage *book = [UIImage systemImageNamed:@"bookmark.fill"];
@@ -253,18 +253,18 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
             check.image = img;
             check.tintColor = sub.isCompleted ? kAITodoAccentColor : [UIColor systemGray3Color];
+            // 子任务文字（按 Markdown 渲染）
+            NSMutableAttributedString *subAtt = [todoMarkdownString(sub.title ?: @"", 13) mutableCopy];
             if (sub.isCompleted) {
-                label.attributedText =
-                    [[NSAttributedString alloc] initWithString:sub.title ?: @""
-                                                    attributes:@{
-                                                        NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle),
-                                                        NSForegroundColorAttributeName: [UIColor secondaryLabelColor],
-                                                    }];
+                [subAtt addAttribute:NSStrikethroughStyleAttributeName value:@(NSUnderlineStyleSingle)
+                               range:NSMakeRange(0, subAtt.length)];
+                [subAtt addAttribute:NSForegroundColorAttributeName value:[UIColor secondaryLabelColor]
+                               range:NSMakeRange(0, subAtt.length)];
             } else {
-                label.attributedText = nil;
-                label.text = sub.title;
-                label.textColor = [UIColor labelColor];
+                [subAtt addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor]
+                               range:NSMakeRange(0, subAtt.length)];
             }
+            label.attributedText = subAtt;
         }
         y += rowH;
     }
