@@ -60,6 +60,7 @@
 @interface CContact : NSObject
 @property (nonatomic, retain) NSString *m_nsUsrName;
 @property (nonatomic, retain) NSString *m_nsNickName;
+@property (nonatomic, retain) NSString *m_nsRemark;
 - (id)initWithContactName:(NSString *)userName;
 @end
 
@@ -117,23 +118,25 @@ static NSString *aiPickColumnName(NSArray *cols, NSArray *candidates) {
 + (NSString *)uiProbeDiagnostic;
 @end
 
-// 找到聊天列表主界面 VC（NewMainFrameViewController）
+// 找到聊天列表主界面 VC（NewMainFrameViewController，BFS 全窗口层级）
 static UIViewController *findNewMainFrameVC(void) {
-    UIViewController *top = tweakTopViewController();
-    NSArray *stack = top.navigationController.viewControllers;
-    for (UIViewController *vc in stack) {
+    NSMutableArray *queue = [NSMutableArray array];
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (w.rootViewController) [queue addObject:w.rootViewController];
+    }
+    NSMutableSet *visited = [NSMutableSet set];
+    while (queue.count > 0) {
+        UIViewController *vc = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (!vc) continue;
+        NSNumber *mark = @((uintptr_t)vc);
+        if ([visited containsObject:mark]) continue;
+        [visited addObject:mark];
         if ([NSStringFromClass([vc class]) rangeOfString:@"NewMainFrame"].location != NSNotFound) {
             return vc;
         }
-    }
-    for (UIWindow *w in [UIApplication sharedApplication].windows) {
-        UIViewController *vc = w.rootViewController;
-        while (vc) {
-            if ([NSStringFromClass([vc class]) rangeOfString:@"NewMainFrame"].location != NSNotFound) {
-                return vc;
-            }
-            vc = vc.presentedViewController;
-        }
+        [queue addObjectsFromArray:vc.childViewControllers];
+        if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
     }
     return nil;
 }
@@ -205,6 +208,9 @@ static NSString *createTodoSessionOnMain(void) {
                     }
                     if ([contact respondsToSelector:@selector(setM_nsNickName:)]) {
                         [contact setM_nsNickName:kAITodoNickName];
+                    }
+                    if ([contact respondsToSelector:@selector(setM_nsRemark:)]) {
+                        [contact setM_nsRemark:kAITodoNickName];
                     }
                     [session setValue:contact forKey:@"m_contact"];
                     setContact = YES;
@@ -1089,6 +1095,7 @@ static NSArray *aiFindDatabaseFiles(void) {
 // 待办联系人的展示后续改用 UI 插行方案，不走数据库写入。
 static NSString *ensureTodoSessionDiagnostic(void) {
     NSMutableArray *candidateTables = [NSMutableArray array];
+    NSMutableArray *contactTables = [NSMutableArray array];
     NSString *sessionTableColumns = @"";
     NSInteger sessionCount = 0, chatCount = 0;
     NSArray *dbs = aiFindDatabaseFiles();
@@ -1120,8 +1127,21 @@ static NSString *ensureTodoSessionDiagnostic(void) {
                 }
                 continue;
             }
+            if ([lower rangeOfString:@"contact"].location != NSNotFound ||
+                [lower rangeOfString:@"friend"].location != NSNotFound) {
+                if (contactTables.count < 4) {
+                    NSArray *cols = aiSQLiteColumns(db, tbl);
+                    [contactTables addObject:[NSString stringWithFormat:@"%@[%@]",
+                                              tbl, [cols componentsJoinedByString:@","]]];
+                }
+            }
         }
         sqlite3_close(db);
+    }
+    NSString *contactLine = @"";
+    if (contactTables.count > 0) {
+        contactLine = [NSString stringWithFormat:@"\n联系人表：%@",
+                       [contactTables componentsJoinedByString:@" | "]];
     }
     if (candidateTables.count > 0) {
         NSInteger total = sessionCount + chatCount;
@@ -1131,7 +1151,8 @@ static NSString *ensureTodoSessionDiagnostic(void) {
         }
         return [NSString stringWithFormat:
                 @"只读探测完成：会话类表 %ld 张 / 聊天类表 %ld 张\n示例：%@%@\n待办联系人方案评估中（只读，未做任何写入）。",
-                (long)sessionCount, (long)chatCount, list, sessionTableColumns];
+                (long)sessionCount, (long)chatCount, list,
+                [sessionTableColumns stringByAppendingString:contactLine]];
     }
     return @"只读探测：未找到 session/chat 相关表；写入已禁用（防闪退）。";
 }
