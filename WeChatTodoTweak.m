@@ -74,14 +74,19 @@
 - (void)DeleteSessionOfUser:(NSString *)userName;
 @end
 
+@interface MainSessionMgr : NSObject
+- (void)updateMainSessionList;
+- (void)rebuildMainSessions;
+@end
+
 static NSString *ensureTodoSessionDiagnostic(void); // 前向声明（定义在下方）
 static NSString *aiMD5Hex(NSString *input);
 static NSArray *aiFindDatabaseFiles(void);
 static NSArray *aiSQLiteTableNames(sqlite3 *db);
 static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
 
-// 用微信原生接口（MMNewSessionMgr AddOrModifySession:）创建待办会话，列表自动刷新
-static NSString *createTodoSessionViaManager(void) {
+// 在主线程构造并调用微信原生接口（AddOrModifySession: 是 UI 操作，必须主线程）
+static NSString *createTodoSessionOnMain(void) {
     Class mgrCls = NSClassFromString(@"MMNewSessionMgr");
     if (!mgrCls) return @"MMNewSessionMgr 类不存在";
     Class centerCls = NSClassFromString(@"MMServiceCenter");
@@ -136,11 +141,30 @@ static NSString *createTodoSessionViaManager(void) {
                     [props componentsJoinedByString:@","]];
         }
         [mgr AddOrModifySession:session withNotifyFlag:YES immediateRefresh:YES];
+        // 强制刷新会话列表（更新+重建兜底）
+        Class mainMgrCls = NSClassFromString(@"MainSessionMgr");
+        id mainMgr = mainMgrCls ? [center getService:mainMgrCls] : nil;
+        if ([mainMgr respondsToSelector:@selector(updateMainSessionList)]) {
+            [mainMgr updateMainSessionList];
+        }
         return [NSString stringWithFormat:@"✅ 已通过微信接口创建待办联系人（userName✓ / 联系人%@）",
                 setContact ? @"✓" : @"✗"];
     } @catch (NSException *e) {
         return [NSString stringWithFormat:@"⚠️ 创建异常：%@", e];
     }
+}
+
+// 确保在主线线程执行
+static NSString *createTodoSessionViaManager(void) {
+    __block NSString *result = @"";
+    if ([NSThread isMainThread]) {
+        result = createTodoSessionOnMain();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = createTodoSessionOnMain();
+        });
+    }
+    return result;
 }
 
 #pragma mark - 基础工具
