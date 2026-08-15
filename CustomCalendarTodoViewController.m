@@ -75,6 +75,11 @@
 @property (nonatomic, strong) NSDate *currentMonth;
 @property (nonatomic, strong) NSMutableArray<NSDate *> *days;
 @property (nonatomic, strong) UIView *topBar;
+@property (nonatomic, strong) UIButton *closeButton;
+@property (nonatomic, strong) UIButton *statsButton;
+@property (nonatomic, strong) UIButton *addButton;
+@property (nonatomic, strong) UIButton *prevMonthButton;
+@property (nonatomic, strong) UIButton *nextMonthButton;
 @property (nonatomic, strong) UILabel *monthLabel;
 @property (nonatomic, strong) UICollectionView *calendarView;
 @property (nonatomic, strong) UILabel *listHeaderLabel;
@@ -127,15 +132,13 @@
     self.topBar = [[UIView alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.topBar];
 
-    UIButton *closeBtn = [self topBarButton:@"xmark"];
-    closeBtn.tag = 0;
-    [closeBtn addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.topBar addSubview:closeBtn];
+    self.closeButton = [self topBarButton:@"xmark"];
+    [self.closeButton addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.topBar addSubview:self.closeButton];
 
-    UIButton *pieBtn = [self topBarButton:@"chart.pie.fill"];
-    pieBtn.tag = 1;
-    [pieBtn addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.topBar addSubview:pieBtn];
+    self.statsButton = [self topBarButton:@"chart.pie.fill"];
+    [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.topBar addSubview:self.statsButton];
 
     UILabel *title = [[UILabel alloc] initWithFrame:CGRectZero];
     title.text = @"待办";
@@ -144,10 +147,9 @@
     title.tag = 101;
     [self.topBar addSubview:title];
 
-    UIButton *addBtn = [self topBarButton:@"plus.circle"];
-    addBtn.tag = 3;
-    [addBtn addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.topBar addSubview:addBtn];
+    self.addButton = [self topBarButton:@"plus.circle"];
+    [self.addButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.topBar addSubview:self.addButton];
 }
 
 - (UIButton *)topBarButton:(NSString *)symbol {
@@ -161,22 +163,20 @@
 #pragma mark - 月份选择 + 日历
 
 - (void)buildMonthRow {
-    UIButton *prev = [UIButton buttonWithType:UIButtonTypeSystem];
-    [prev setImage:[UIImage systemImageNamed:@"chevron.left"] forState:UIControlStateNormal];
-    [prev addTarget:self action:@selector(prevMonth) forControlEvents:UIControlEventTouchUpInside];
-    prev.tag = 201;
-    [self.view addSubview:prev];
+    self.prevMonthButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.prevMonthButton setImage:[UIImage systemImageNamed:@"chevron.left"] forState:UIControlStateNormal];
+    [self.prevMonthButton addTarget:self action:@selector(prevMonth) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.prevMonthButton];
 
     self.monthLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.monthLabel.font = [UIFont boldSystemFontOfSize:16];
     self.monthLabel.textAlignment = NSTextAlignmentCenter;
     [self.view addSubview:self.monthLabel];
 
-    UIButton *next = [UIButton buttonWithType:UIButtonTypeSystem];
-    [next setImage:[UIImage systemImageNamed:@"chevron.right"] forState:UIControlStateNormal];
-    [next addTarget:self action:@selector(nextMonth) forControlEvents:UIControlEventTouchUpInside];
-    next.tag = 202;
-    [self.view addSubview:next];
+    self.nextMonthButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.nextMonthButton setImage:[UIImage systemImageNamed:@"chevron.right"] forState:UIControlStateNormal];
+    [self.nextMonthButton addTarget:self action:@selector(nextMonth) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.nextMonthButton];
 }
 
 - (void)buildCalendar {
@@ -511,24 +511,19 @@
     UIEdgeInsets sa = self.view.safeAreaInsets;
     CGFloat w = b.size.width;
 
-    self.topBar.frame = CGRectMake(0, 0, w, sa.top + 44);
-    UIButton *closeBtn = [self buttonInView:self.topBar tag:0];
-    UIButton *pieBtn = [self buttonInView:self.topBar tag:1];
-    UIButton *addBtn = [self buttonInView:self.topBar tag:3];
-    closeBtn.frame = CGRectMake(8, sa.top, 44, 44);
-    pieBtn.frame = CGRectMake(52, sa.top, 44, 44);
-    addBtn.frame = CGRectMake(w - 52, sa.top, 44, 44);
+    self.topBar.frame = CGRectMake(0, 0, w, sa.top + 48);
+    self.closeButton.frame = CGRectMake(8, sa.top, 44, 44);
+    self.statsButton.frame = CGRectMake(52, sa.top, 44, 44);
+    self.addButton.frame = CGRectMake(w - 52, sa.top, 44, 44);
     UILabel *title = [self.topBar viewWithTag:101];
     title.frame = CGRectMake(100, sa.top, w - 200, 44);
 
-    CGFloat monthY = sa.top + 44 + 6;
-    UIButton *prev = [self buttonInView:self.view tag:201];
-    UIButton *next = [self buttonInView:self.view tag:202];
-    prev.frame = CGRectMake(16, monthY, 40, 32);
-    next.frame = CGRectMake(w - 56, monthY, 40, 32);
-    self.monthLabel.frame = CGRectMake(60, monthY, w - 120, 32);
+    CGFloat monthY = sa.top + 48 + 10;
+    self.prevMonthButton.frame = CGRectMake(16, monthY, 44, 34);
+    self.nextMonthButton.frame = CGRectMake(w - 60, monthY, 44, 34);
+    self.monthLabel.frame = CGRectMake(64, monthY, w - 128, 34);
 
-    CGFloat calY = monthY + 32 + 8;
+    CGFloat calY = monthY + 34 + 10;
     self.calendarView.frame = CGRectMake(0, calY, w, 84);
     if (!self.didInitialScroll) {
         self.didInitialScroll = YES;
@@ -541,10 +536,6 @@
     CGFloat tableY = headerY + 24 + 4;
     self.tableView.frame = CGRectMake(0, tableY, w, b.size.height - tableY - sa.bottom);
     self.emptyLabel.frame = CGRectMake(32, tableY + 80, w - 64, 80);
-}
-
-- (UIButton *)buttonInView:(UIView *)view tag:(NSInteger)tag {
-    return (UIButton *)[view viewWithTag:tag];
 }
 
 @end
