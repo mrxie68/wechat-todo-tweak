@@ -23,7 +23,7 @@ static UIColor *cardSelectedColor(void) {
     return [UIColor colorWithRed:0.85 green:0.78 blue:0.95 alpha:1.0];
 }
 
-// 估算子任务文字行数（中文按字号宽度，英文近似）
+// 估算子任务文字行数
 static NSInteger todoSubLines(NSString *text, CGFloat width) {
     if (text.length == 0) return 1;
     CGFloat perLine = MAX(1.0, width / 13.0);
@@ -42,24 +42,21 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         self.backgroundColor = [UIColor clearColor];
         self.selectionStyle = UITableViewCellSelectionStyleNone;
 
+        // 时间：卡片外左上
         _timeLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        _timeLabel.font = [UIFont systemFontOfSize:13];
+        _timeLabel.font = [UIFont systemFontOfSize:12];
         _timeLabel.textColor = [UIColor secondaryLabelColor];
-        _timeLabel.textAlignment = NSTextAlignmentCenter;
+        [self.contentView addSubview:_timeLabel];
 
         _cardView = [[UIView alloc] initWithFrame:CGRectZero];
         _cardView.layer.cornerRadius = 14;
         _cardView.clipsToBounds = YES;
         [self.contentView addSubview:_cardView];
 
-        // 顶部书签条：和卡片同宽，收藏时泛金；时间居中显示在条上
-        _headerBar = [[UIView alloc] initWithFrame:CGRectZero];
-        [self.cardView addSubview:_headerBar];
-        UIView *hairline = [[UIView alloc] initWithFrame:CGRectZero];
-        hairline.tag = 3;
-        hairline.backgroundColor = [UIColor separatorColor];
-        [self.cardView addSubview:hairline];
-        [self.cardView addSubview:_timeLabel];
+        // 金色书签条（薄条，收藏时显示，不改变卡片高度）
+        _bookmarkStrip = [[UIView alloc] initWithFrame:CGRectZero];
+        _bookmarkStrip.backgroundColor = [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0];
+        [self.cardView addSubview:_bookmarkStrip];
 
         _iconBg = [[UIView alloc] initWithFrame:CGRectZero];
         _iconBg.layer.cornerRadius = 9;
@@ -112,19 +109,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     _timeLabel.text = [fmt stringFromDate:todo.createTime];
 
     _cardView.backgroundColor = todo.isSelected ? cardSelectedColor() : cardUnselectedColor();
-
-    // 书签条：收藏时整条泛金（长度=卡片宽度），时间居中
-    if (@available(iOS 13.0, *)) {
-        _headerBar.backgroundColor =
-            [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
-                return trait.userInterfaceStyle == UIUserInterfaceStyleDark
-                    ? [UIColor colorWithRed:0.45 green:0.38 blue:0.24 alpha:1.0]
-                    : [UIColor colorWithRed:0.99 green:0.94 blue:0.83 alpha:1.0];
-            }];
-    } else {
-        _headerBar.backgroundColor = [UIColor colorWithRed:0.99 green:0.94 blue:0.83 alpha:1.0];
-    }
-    _headerBar.hidden = !todo.isBookmarked;
+    _bookmarkStrip.hidden = !todo.isBookmarked; // 收藏时顶部一条金
 
     // 图标
     _iconBg.backgroundColor = todo.isSelected
@@ -134,6 +119,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         ? [UIColor colorWithRed:0.42 green:0.30 blue:0.72 alpha:1.0]
         : [UIColor colorWithRed:0.45 green:0.34 blue:0.72 alpha:1.0];
 
+    // 标题
     if (todo.done) {
         _titleLabel.attributedText =
             [[NSAttributedString alloc] initWithString:todo.title ?: @""
@@ -152,13 +138,12 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     [_plusButton setImage:plus forState:UIControlStateNormal];
     _plusButton.tintColor = [UIColor secondaryLabelColor];
 
-    // 子任务行
+    // 子任务行（卡片下方，页面灰底，只有圈+文字）
     for (UIView *v in _subRows) [v removeFromSuperview];
     [_subRows removeAllObjects];
     if (todo.isSelected) {
         for (SubTaskItem *sub in todo.subTasks) {
             UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
-            // 子任务行放在卡片下方（页面灰底上），不要背景，只有圈+文字
             [self.contentView addSubview:row];
             UIImageView *check = [[UIImageView alloc] initWithFrame:CGRectZero];
             check.tag = 1;
@@ -170,7 +155,6 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             rowLongPress.minimumPressDuration = 0.35;
             rowLongPress.delegate = self;
             [row addGestureRecognizer:rowLongPress];
-            // 整行点击 = 完成/取消完成
             UITapGestureRecognizer *rowTap =
                 [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(subRowTapped:)];
             [rowTap requireGestureRecognizerToFail:rowLongPress];
@@ -178,7 +162,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
             label.tag = 2;
             label.font = [UIFont systemFontOfSize:13];
-            label.numberOfLines = 0; // 长文字自动换行，完整显示
+            label.numberOfLines = 0;
             label.lineBreakMode = NSLineBreakByWordWrapping;
             [row addSubview:label];
             [_subRows addObject:row];
@@ -191,25 +175,10 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 }
 
 - (void)subRowTapped:(UITapGestureRecognizer *)gesture {
-    UIView *row = gesture.view;
-    NSUInteger idx = [_subRows indexOfObject:row];
+    NSUInteger idx = [_subRows indexOfObject:gesture.view];
     if (idx != NSNotFound && idx < _todo.subTasks.count) {
         if (self.onToggleSubTask) self.onToggleSubTask(_todo.subTasks[idx]);
     }
-}
-
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
-       shouldReceiveTouch:(UITouch *)touch {
-    if (gestureRecognizer == self.cardTapGesture ||
-        gestureRecognizer == self.cardLongPressGesture) {
-        // 卡片手势：按钮（加号/书签/勾选）和子任务行不触发
-        if ([touch.view isKindOfClass:[UIControl class]]) return NO;
-        for (UIView *row in _subRows) {
-            if ([touch.view isDescendantOfView:row]) return NO;
-        }
-        return YES;
-    }
-    return YES; // 子任务行长按等其它手势照常接收
 }
 
 - (void)subRowLongPressed:(UILongPressGestureRecognizer *)gesture {
@@ -220,34 +189,43 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     }
 }
 
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+       shouldReceiveTouch:(UITouch *)touch {
+    if (gestureRecognizer == self.cardTapGesture ||
+        gestureRecognizer == self.cardLongPressGesture) {
+        if ([touch.view isKindOfClass:[UIControl class]]) return NO;
+        for (UIView *row in _subRows) {
+            if ([touch.view isDescendantOfView:row]) return NO;
+        }
+        return YES;
+    }
+    return YES;
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.contentView.bounds.size.width;
-    CGFloat headerH = 28;
     CGFloat mainH = 64;
-    CGFloat cardX = 12;
+    CGFloat cardX = 64;
     CGFloat cardW = w - cardX - 12;
-    _cardView.frame = CGRectMake(cardX, 4, cardW, headerH + mainH);
 
-    _headerBar.frame = CGRectMake(0, 0, cardW, headerH);
-    UIView *hairline = [_cardView viewWithTag:3];
-    hairline.frame = CGRectMake(0, headerH - 0.5, cardW, 0.5);
-    _timeLabel.frame = CGRectMake(0, 0, cardW, headerH);
+    // 时间在卡片外左上，高度固定，不与卡片冲突
+    _timeLabel.frame = CGRectMake(12, 6, 46, 16);
+
+    _cardView.frame = CGRectMake(cardX, 4, cardW, mainH);
+    _bookmarkStrip.frame = CGRectMake(0, 0, cardW, 4);
 
     CGFloat iconSize = 34;
-    _iconBg.frame = CGRectMake(12, headerH + (mainH - iconSize) / 2.0, iconSize, iconSize);
+    _iconBg.frame = CGRectMake(12, (mainH - iconSize) / 2.0, iconSize, iconSize);
     _iconView.frame = CGRectInset(_iconBg.bounds, 8, 8);
+    _plusButton.frame = CGRectMake(cardW - 12 - 38, (mainH - 38) / 2.0, 38, 38);
+    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 60, mainH - 12);
 
-    CGFloat rightX = cardW - 12;
-    _plusButton.frame = CGRectMake(rightX - 38, headerH + (mainH - 38) / 2.0, 38, 38);
-    _titleLabel.frame = CGRectMake(56, headerH + 6, cardW - 56 - 50, mainH - 12);
-
-    CGFloat y = 4 + headerH + mainH + 4;
+    CGFloat y = 4 + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
         UIImageView *check = (UIImageView *)[row viewWithTag:1];
         UILabel *label = [row viewWithTag:2];
-
         SubTaskItem *sub = (i < _todo.subTasks.count) ? _todo.subTasks[i] : nil;
         CGFloat rowW = cardW - 14;
         CGFloat labelW = rowW - 32;
@@ -279,11 +257,10 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 }
 
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
-    CGFloat headerH = 28;
     CGFloat mainH = 64;
     CGFloat subH = 0;
     if (todo.isSelected) {
-        CGFloat cardX = 12, cardRight = 12;
+        CGFloat cardX = 64, cardRight = 12; // 与 layoutSubviews 保持一致
         CGFloat cardW = width - cardX - cardRight;
         CGFloat labelW = cardW - 14 - 32;
         for (SubTaskItem *s in todo.subTasks) {
@@ -291,7 +268,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
             subH += MAX(34, lines * 17 + 14);
         }
     }
-    return 4 + headerH + mainH + 4 + subH + 4;
+    return 4 + mainH + 4 + subH + 4;
 }
 
 @end

@@ -18,7 +18,7 @@
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UIButton *plusButton;
 @property (nonatomic, strong) NSMutableArray *subRows;
-@property (nonatomic, strong) UIView *headerBar;
+@property (nonatomic, strong) UIView *bookmarkStrip;
 @property (nonatomic, strong) UITapGestureRecognizer *cardTapGesture;
 @property (nonatomic, strong) UILongPressGestureRecognizer *cardLongPressGesture;
 
