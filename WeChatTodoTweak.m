@@ -457,9 +457,13 @@ static NSString *ensureTodoSessionDiagnostic(void) {
 
 #pragma mark - hook 安装 / wcplugins 注册
 
+static BOOL g_hooksInstalled = NO;
+
 static int installHooks(void) {
+    if (g_hooksInstalled) return 1; // 幂等：防止重复 swizzle 导致递归闪退
     Class cls = NSClassFromString(@"CMessageMgr");
     if (!cls) return 0;
+    g_hooksInstalled = YES;
     Method recvMethod = class_getInstanceMethod(cls, @selector(AsyncOnAddMsg:MsgWrap:));
     if (recvMethod) {
         orig_AsyncOnAddMsg = (void *)method_getImplementation(recvMethod);

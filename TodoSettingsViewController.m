@@ -149,8 +149,13 @@
 }
 
 - (void)refreshSessionStatus {
-    NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
-    self.sessionStatusLabel.text = diag;
+    self.sessionStatusLabel.text = @"正在探测…";
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.sessionStatusLabel.text = diag;
+        });
+    });
 }
 
 - (void)saveTapped {
@@ -207,12 +212,24 @@
 }
 
 - (void)checkSessionTapped {
-    [self refreshSessionStatus];
-    UIAlertController *r = [UIAlertController alertControllerWithTitle:@"待办联系人"
-                                                               message:self.sessionStatusLabel.text
-                                                        preferredStyle:UIAlertControllerStyleAlert];
-    [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:r animated:YES completion:nil];
+    [self.view endEditing:YES];
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:@"正在探测"
+                                                                     message:@"正在只读扫描会话库…\n\n"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:progress animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *diag = [WeChatTodoHandler todoSessionDiagnostic];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.sessionStatusLabel.text = diag;
+            [progress dismissViewControllerAnimated:NO completion:^{
+                UIAlertController *r = [UIAlertController alertControllerWithTitle:@"待办联系人"
+                                                                           message:diag
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                [r addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:r animated:YES completion:nil];
+            }];
+        });
+    });
 }
 
 static void WeChatTodoHandler_todoAlert(NSString *msg) {
