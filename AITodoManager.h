@@ -1,16 +1,26 @@
 #import <Foundation/Foundation.h>
+#import "MainTodoItem.h"
 
-// 待办事项：本地存储为主，供待办页 UI 调用，可同步到 Memos
+// 待办数据层：本地模型化存储（NSCoding），旧字典数据自动迁移
 @interface AITodoManager : NSObject
 
-+ (NSArray<NSDictionary *> *)allTodos;         // [{id, content, created, done, doneAt}]
++ (NSArray<MainTodoItem *> *)allTodos;                 // 全部（按 identifier 倒序）
 + (NSUInteger)unfinishedCount;
-+ (NSString *)addTodo:(NSString *)content;     // 新增，返回确认文本
-+ (NSString *)markTodo:(NSInteger)todoId done:(BOOL)done;
-+ (NSString *)deleteTodo:(NSInteger)todoId;
-+ (NSString *)clearDone;                      // 清空所有已完成，返回提示文本
-+ (BOOL)updateTodo:(NSInteger)todoId content:(NSString *)content note:(NSString *)note
-                due:(double)due important:(BOOL)important; // 更新内容/备注/截止/重要
-+ (NSString *)syncToMemosNow;                  // 同步，返回结果文本
++ (MainTodoItem *)addTodo:(NSString *)content;         // 新增到当前时间
++ (MainTodoItem *)addTodo:(NSString *)content atDate:(NSDate *)date; // 新增到指定日期（时间用 date）
++ (BOOL)markTodo:(NSInteger)todoId done:(BOOL)done;
++ (BOOL)deleteTodo:(NSInteger)todoId;
++ (BOOL)updateTodo:(NSInteger)todoId title:(NSString *)title note:(NSString *)note
+                due:(NSDate *)due bookmarked:(BOOL)bookmarked;
++ (BOOL)addSubTask:(NSString *)subTitle toTodo:(NSInteger)todoId;
++ (BOOL)toggleSubTask:(NSString *)subId inTodo:(NSInteger)todoId;
++ (BOOL)setTodo:(NSInteger)todoId selected:(BOOL)selected;
++ (BOOL)toggleBookmarkForTodo:(NSInteger)todoId;
++ (NSUInteger)clearDone;
+
+// 某一天的任务（按 createTime 正序）
++ (NSArray<MainTodoItem *> *)todosOnDay:(NSDate *)day;
+
++ (NSString *)syncToMemosNow;                          // 同步未完成到 Memos
 
 @end

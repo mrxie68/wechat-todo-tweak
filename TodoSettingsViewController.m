@@ -1,7 +1,7 @@
 #import "TodoSettingsViewController.h"
 #import "AISettings.h"
 #import "AITodoManager.h"
-#import "TodoPageViewController.h"
+#import "CustomCalendarTodoViewController.h"
 #import "AIConfig.h"
 
 extern NSString *todoTabDiagnostic(void); // 由 WeChatTodoTweak.m 提供
@@ -192,7 +192,7 @@ static void todoAlert(NSString *msg); // 前向声明
 
 - (void)openTodoTapped {
     [self.view endEditing:YES];
-    [TodoPageViewController presentFrom:self];
+    [CustomCalendarTodoViewController presentFrom:self];
 }
 
 // 诊断结果：完整内容复制剪贴板，弹窗只显示摘要；2 分钟后自动清空剪贴板（用完即销毁）

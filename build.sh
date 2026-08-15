@@ -20,8 +20,8 @@ clang \
   -framework QuartzCore \
   -lsqlite3 \
   -o wechat-todo.dylib \
-  AISettings.m AITodoManager.m TodoSettingsViewController.m TodoPageViewController.m \
-  TodoDetailViewController.m TodoTableViewCell.m WeChatTodoTweak.m
+  AISettings.m AITodoManager.m SubTaskItem.m MainTodoItem.m \
+  TodoSettingsViewController.m CustomCalendarTodoViewController.m CustomTodoTableViewCell.m WeChatTodoTweak.m
 
 codesign -f -s - wechat-todo.dylib || true
 

@@ -2,128 +2,220 @@
 #import "AISettings.h"
 #import "AIConfig.h"
 
-static NSString * const kAITodoListKey = @"WeChatAITodoList_";
+static NSString * const kAITodoOldListKey = @"WeChatAITodoList_";
+static NSString * const kAITodoModelListKey = @"WeChatTodoModels_";
 
 @implementation AITodoManager
 
-+ (NSString *)todoListKey {
++ (NSString *)oldListKey {
     NSString *acc = [AISettings currentAccount];
-    if (acc.length == 0) return kAITodoListKey;
-    return [kAITodoListKey stringByAppendingString:acc];
+    if (acc.length == 0) return kAITodoOldListKey;
+    return [kAITodoOldListKey stringByAppendingString:acc];
 }
 
-+ (NSMutableArray *)loadTodos {
-    NSMutableArray *list = [[[NSUserDefaults standardUserDefaults]
-                             arrayForKey:[self todoListKey]] mutableCopy];
-    return list ?: [NSMutableArray array];
++ (NSString *)modelListKey {
+    NSString *acc = [AISettings currentAccount];
+    if (acc.length == 0) return kAITodoModelListKey;
+    return [kAITodoModelListKey stringByAppendingString:acc];
 }
 
-+ (void)saveTodos:(NSArray *)todos {
-    [[NSUserDefaults standardUserDefaults] setObject:todos forKey:[self todoListKey]];
-    [[NSUserDefaults standardUserDefaults] synchronize];
++ (NSMutableArray<MainTodoItem *> *)loadTodos {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSData *data = [defaults dataForKey:[self modelListKey]];
+    if (data) {
+        NSSet *classes = [NSSet setWithObjects:[NSArray class], [NSMutableArray class],
+                          [MainTodoItem class], [SubTaskItem class], nil];
+        NSArray *arr = [NSKeyedUnarchiver unarchivedObjectOfClasses:classes fromData:data error:nil];
+        return [NSMutableArray arrayWithArray:arr ?: @[]];
+    }
+    // 迁移旧版字典数据
+    NSArray *old = [defaults arrayForKey:[self oldListKey]];
+    NSMutableArray *models = [NSMutableArray array];
+    for (NSDictionary *t in old ?: @[]) {
+        MainTodoItem *m = [[MainTodoItem alloc] init];
+        m.identifier = [t[@"id"] integerValue];
+        m.title = t[@"content"] ?: @"";
+        double created = [t[@"created"] doubleValue];
+        m.createTime = created > 0 ? [NSDate dateWithTimeIntervalSince1970:created] : [NSDate date];
+        m.done = [t[@"done"] boolValue];
+        double doneAt = [t[@"doneAt"] doubleValue];
+        m.doneAt = doneAt > 0 ? [NSDate dateWithTimeIntervalSince1970:doneAt] : nil;
+        m.note = t[@"note"];
+        double due = [t[@"due"] doubleValue];
+        m.dueDate = due > 0 ? [NSDate dateWithTimeIntervalSince1970:due] : nil;
+        m.isBookmarked = [t[@"important"] boolValue];
+        m.subTasks = [NSMutableArray array];
+        [models addObject:m];
+    }
+    [self saveTodos:models];
+    return models;
 }
 
-+ (NSArray<NSDictionary *> *)allTodos {
-    return [self loadTodos];
++ (void)saveTodos:(NSArray<MainTodoItem *> *)todos {
+    NSError *error = nil;
+    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:todos
+                                         requiringSecureCoding:YES
+                                                         error:&error];
+    if (data) {
+        [[NSUserDefaults standardUserDefaults] setObject:data forKey:[self modelListKey]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    } else {
+        NSLog(kAITodoLogPrefix "保存失败: %@", error);
+    }
+}
+
++ (MainTodoItem *)todoWithId:(NSInteger)todoId inList:(NSArray *)list {
+    for (MainTodoItem *m in list) {
+        if (m.identifier == todoId) return m;
+    }
+    return nil;
+}
+
++ (NSArray<MainTodoItem *> *)allTodos {
+    NSArray *list = [self loadTodos];
+    return [list sortedArrayUsingComparator:^NSComparisonResult(MainTodoItem *a, MainTodoItem *b) {
+        if (a.identifier > b.identifier) return NSOrderedAscending;
+        if (a.identifier < b.identifier) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
 }
 
 + (NSUInteger)unfinishedCount {
     NSUInteger n = 0;
-    for (NSDictionary *t in [self loadTodos]) {
-        if (![t[@"done"] boolValue]) n++;
+    for (MainTodoItem *m in [self loadTodos]) {
+        if (!m.done) n++;
     }
     return n;
 }
 
-+ (NSString *)addTodo:(NSString *)content {
++ (MainTodoItem *)addTodo:(NSString *)content {
+    return [self addTodo:content atDate:[NSDate date]];
+}
+
++ (MainTodoItem *)addTodo:(NSString *)content atDate:(NSDate *)date {
     NSMutableArray *list = [self loadTodos];
     NSInteger nextId = 1;
-    for (NSDictionary *t in list) {
-        NSInteger tid = [t[@"id"] integerValue];
-        if (tid >= nextId) nextId = tid + 1;
+    for (MainTodoItem *m in list) {
+        if (m.identifier >= nextId) nextId = m.identifier + 1;
     }
-    [list addObject:@{
-        @"id": @(nextId),
-        @"content": content,
-        @"created": @([[NSDate date] timeIntervalSince1970]),
-        @"done": @NO,
-        @"doneAt": @0,
-    }];
+    MainTodoItem *item = [[MainTodoItem alloc] init];
+    item.identifier = nextId;
+    item.title = content;
+    item.createTime = date ?: [NSDate date];
+    [list addObject:item];
     [self saveTodos:list];
-    // 同步到 Memos（后台异步、尽力而为，失败不影响本地）
     [self syncToMemosAsync];
-    return [NSString stringWithFormat:@"✅ 已记录 #%ld：%@", (long)nextId, content];
+    return item;
 }
 
-+ (NSString *)markTodo:(NSInteger)todoId done:(BOOL)done {
++ (BOOL)markTodo:(NSInteger)todoId done:(BOOL)done {
     NSMutableArray *list = [self loadTodos];
-    for (NSDictionary *t in list) {
-        if ([t[@"id"] integerValue] == todoId) {
-            NSMutableDictionary *m = [t mutableCopy];
-            m[@"done"] = @(done);
-            m[@"doneAt"] = @([[NSDate date] timeIntervalSince1970]);
-            [list replaceObjectAtIndex:[list indexOfObject:t] withObject:m];
-            [self saveTodos:list];
-            if (done) [self syncToMemosAsync];
-            return done
-                ? [NSString stringWithFormat:@"✅ #%ld 已完成：%@", (long)todoId, t[@"content"]]
-                : [NSString stringWithFormat:@"↩️ #%ld 已标回未完成：%@", (long)todoId, t[@"content"]];
-        }
-    }
-    return [NSString stringWithFormat:@"⚠️ 没有找到 #%ld", (long)todoId];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    m.done = done;
+    m.doneAt = done ? [NSDate date] : nil;
+    [self saveTodos:list];
+    if (done) [self syncToMemosAsync];
+    return YES;
 }
 
-+ (NSString *)deleteTodo:(NSInteger)todoId {
++ (BOOL)deleteTodo:(NSInteger)todoId {
     NSMutableArray *list = [self loadTodos];
-    for (NSDictionary *t in list) {
-        if ([t[@"id"] integerValue] == todoId) {
-            [list removeObject:t];
-            [self saveTodos:list];
-            return [NSString stringWithFormat:@"🗑 已删除 #%ld：%@", (long)todoId, t[@"content"]];
-        }
-    }
-    return [NSString stringWithFormat:@"⚠️ 没有找到 #%ld", (long)todoId];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    [list removeObject:m];
+    [self saveTodos:list];
+    return YES;
 }
 
-+ (NSString *)clearDone {
++ (BOOL)updateTodo:(NSInteger)todoId title:(NSString *)title note:(NSString *)note
+                due:(NSDate *)due bookmarked:(BOOL)bookmarked {
     NSMutableArray *list = [self loadTodos];
-    NSMutableArray *kept = [NSMutableArray array];
-    NSUInteger removed = 0;
-    for (NSDictionary *t in list) {
-        if ([t[@"done"] boolValue]) {
-            removed++;
-        } else {
-            [kept addObject:t];
-        }
-    }
-    [self saveTodos:kept];
-    return removed > 0
-        ? [NSString stringWithFormat:@"🧹 已清空 %lu 条已完成记录", (unsigned long)removed]
-        : @"没有已完成的记录可清空。";
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    NSString *trimmed = [title stringByTrimmingCharactersInSet:
+                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length > 0) m.title = trimmed;
+    NSString *trimmedNote = [note stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    m.note = trimmedNote.length > 0 ? trimmedNote : nil;
+    m.dueDate = due;
+    m.isBookmarked = bookmarked;
+    [self saveTodos:list];
+    return YES;
 }
 
-+ (BOOL)updateTodo:(NSInteger)todoId content:(NSString *)content note:(NSString *)note
-                due:(double)due important:(BOOL)important {
++ (BOOL)addSubTask:(NSString *)subTitle toTodo:(NSInteger)todoId {
+    NSString *trimmed = [subTitle stringByTrimmingCharactersInSet:
+                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) return NO;
     NSMutableArray *list = [self loadTodos];
-    for (NSDictionary *t in list) {
-        if ([t[@"id"] integerValue] == todoId) {
-            NSMutableDictionary *m = [t mutableCopy];
-            NSString *trimmed = [content stringByTrimmingCharactersInSet:
-                                 [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if (trimmed.length > 0) m[@"content"] = trimmed;
-            NSString *trimmedNote = [note stringByTrimmingCharactersInSet:
-                                     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if (trimmedNote.length > 0) m[@"note"] = trimmedNote;
-            else [m removeObjectForKey:@"note"];
-            if (due > 0) m[@"due"] = @(due);
-            else [m removeObjectForKey:@"due"];
-            m[@"important"] = @(important);
-            [list replaceObjectAtIndex:[list indexOfObject:t] withObject:m];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    [m.subTasks addObject:[SubTaskItem subTaskWithTitle:trimmed]];
+    [self saveTodos:list];
+    return YES;
+}
+
++ (BOOL)toggleSubTask:(NSString *)subId inTodo:(NSInteger)todoId {
+    NSMutableArray *list = [self loadTodos];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    for (SubTaskItem *s in m.subTasks) {
+        if ([s.identifier isEqualToString:subId]) {
+            s.isCompleted = !s.isCompleted;
             [self saveTodos:list];
             return YES;
         }
     }
     return NO;
+}
+
++ (BOOL)setTodo:(NSInteger)todoId selected:(BOOL)selected {
+    NSMutableArray *list = [self loadTodos];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    m.isSelected = selected;
+    [self saveTodos:list];
+    return YES;
+}
+
++ (BOOL)toggleBookmarkForTodo:(NSInteger)todoId {
+    NSMutableArray *list = [self loadTodos];
+    MainTodoItem *m = [self todoWithId:todoId inList:list];
+    if (!m) return NO;
+    m.isBookmarked = !m.isBookmarked;
+    [self saveTodos:list];
+    return YES;
+}
+
++ (NSUInteger)clearDone {
+    NSMutableArray *list = [self loadTodos];
+    NSMutableArray *kept = [NSMutableArray array];
+    NSUInteger removed = 0;
+    for (MainTodoItem *m in list) {
+        if (m.done) removed++;
+        else [kept addObject:m];
+    }
+    [self saveTodos:kept];
+    return removed;
+}
+
++ (NSArray<MainTodoItem *> *)todosOnDay:(NSDate *)day {
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSDate *start = [cal startOfDayForDate:day];
+    NSDate *end = [cal dateByAddingUnit:NSCalendarUnitDay value:1 toDate:start options:0];
+    NSMutableArray *out = [NSMutableArray array];
+    for (MainTodoItem *m in [self loadTodos]) {
+        if ([m.createTime compare:start] != NSOrderedAscending &&
+            [m.createTime compare:end] == NSOrderedAscending) {
+            [out addObject:m];
+        }
+    }
+    [out sortUsingComparator:^NSComparisonResult(MainTodoItem *a, MainTodoItem *b) {
+        return [a.createTime compare:b.createTime];
+    }];
+    return out;
 }
 
 // ===== Memos 同步（尽力而为：失败不影响本地） =====
@@ -136,7 +228,6 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
     return url;
 }
 
-// 后台异步同步（新增/完成时调用，不阻塞 UI）
 + (void)syncToMemosAsync {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         NSString *result = [self syncToMemosNow];
@@ -147,29 +238,18 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
 + (NSString *)syncToMemosNow {
     NSString *base = [self memosBaseURL];
     NSString *token = [AISettings memosToken];
-    if (base.length == 0) {
-        return @"⚠️ 还没配置 Memos 地址：设置 → Memos 地址。";
-    }
-    if (token.length == 0) {
-        return @"⚠️ 还没配置 Access Token：设置 → Token。";
-    }
+    if (base.length == 0) return @"⚠️ 还没配置 Memos 地址：设置 → Memos 地址。";
+    if (token.length == 0) return @"⚠️ 还没配置 Access Token：设置 → Token。";
 
-    NSMutableArray *list = [self loadTodos];
     NSMutableArray *unfinished = [NSMutableArray array];
-    for (NSDictionary *t in list) {
-        if (![t[@"done"] boolValue]) {
-            [unfinished addObject:t[@"content"]];
-        }
+    for (MainTodoItem *m in [self loadTodos]) {
+        if (!m.done) [unfinished addObject:m.title];
     }
-    if (unfinished.count == 0) {
-        return @"暂无未完成待办可同步。";
-    }
+    if (unfinished.count == 0) return @"暂无未完成待办可同步。";
 
     NSString *urlStr = [base stringByAppendingString:@"/api/v1/memos"];
     NSURL *url = [NSURL URLWithString:urlStr];
-    if (!url) {
-        return @"⚠️ Memos 地址格式不对，IPv6 请用 http://[地址]:端口 的格式。";
-    }
+    if (!url) return @"⚠️ Memos 地址格式不对，IPv6 请用 http://[地址]:端口 的格式。";
 
     __block NSInteger okCount = 0;
     __block NSInteger failCount = 0;
@@ -179,10 +259,7 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
 
     for (NSString *content in unfinished) {
         NSString *memoContent = [NSString stringWithFormat:@"📌 待办：%@", content];
-        NSDictionary *body = @{
-            @"content": memoContent,
-            @"visibility": visibility,
-        };
+        NSDictionary *body = @{ @"content": memoContent, @"visibility": visibility };
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
         request.HTTPMethod = @"POST";
         [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
@@ -190,7 +267,6 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
        forHTTPHeaderField:@"Authorization"];
         request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
         [request setTimeoutInterval:10];
-
         NSURLSessionDataTask *task = [[NSURLSession sharedSession]
                                       dataTaskWithRequest:request
                                       completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
@@ -210,9 +286,7 @@ static NSString * const kAITodoListKey = @"WeChatAITodoList_";
         [task resume];
     }
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
-    if (!done) {
-        return @"⏳ Memos 同步超时，请检查地址和网络（IPv6 是否可达）。";
-    }
+    if (!done) return @"⏳ Memos 同步超时，请检查地址和网络（IPv6 是否可达）。";
     return [NSString stringWithFormat:@"☁️ Memos 同步完成：成功 %ld 条，失败 %ld 条。",
             (long)okCount, (long)failCount];
 }

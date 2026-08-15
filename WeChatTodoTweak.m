@@ -20,7 +20,7 @@
 #import "AIConfig.h"
 #import "AISettings.h"
 #import "AITodoManager.h"
-#import "TodoPageViewController.h"
+#import "CustomCalendarTodoViewController.h"
 
 #pragma mark - 微信私有接口声明
 
@@ -534,7 +534,7 @@ static TodoTabTarget *g_todoTabTarget = nil;
 - (void)todoTabTapped {
     diagLog(@"底部菜单「待办」tab 点击");
     [self setSelected:YES];
-    [TodoPageViewController presentFrom:tweakTopViewController()];
+    [CustomCalendarTodoViewController presentFrom:tweakTopViewController()];
 }
 
 @end
