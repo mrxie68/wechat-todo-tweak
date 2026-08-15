@@ -39,6 +39,19 @@
                                         target:self action:@selector(saveTapped)];
     self.navigationItem.rightBarButtonItem.tintColor = kAITodoAccentColor;
 
+    // 导航栏不透明白，和页面一致（pageSheet 默认透明）
+    UINavigationBar *bar = self.navigationController.navigationBar;
+    bar.translucent = NO;
+    bar.barTintColor = [UIColor systemBackgroundColor];
+    if (@available(iOS 13.0, *)) {
+        UINavigationBarAppearance *app = [[UINavigationBarAppearance alloc] init];
+        [app configureWithOpaqueBackground];
+        app.backgroundColor = [UIColor systemBackgroundColor];
+        app.shadowColor = [UIColor clearColor];
+        bar.standardAppearance = app;
+        bar.scrollEdgeAppearance = app;
+    }
+
     // 大圆角文本框
     self.textView = [[UITextView alloc] initWithFrame:CGRectZero];
     self.textView.font = [UIFont systemFontOfSize:16];

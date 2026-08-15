@@ -129,11 +129,12 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         _titleLabel.textColor = [UIColor labelColor];
     }
 
-    // 书签
-    UIImage *book = [UIImage systemImageNamed:@"bookmark.fill"];
+    // 书签：金色实心=已书签，灰色空心=未书签
+    UIImage *book = [UIImage systemImageNamed:todo.isBookmarked ? @"bookmark.fill" : @"bookmark"];
     [_bookmarkButton setImage:book forState:UIControlStateNormal];
-    _bookmarkButton.tintColor = [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0];
-    _bookmarkButton.alpha = todo.isBookmarked ? 1.0 : 0.25;
+    _bookmarkButton.tintColor = todo.isBookmarked
+        ? [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0]
+        : [UIColor systemGray3Color];
 
     // 加号
     UIImage *plus = [UIImage systemImageNamed:@"plus.circle.fill"];
@@ -230,8 +231,8 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 
     CGFloat rightX = cardW - 12;
     _plusButton.frame = CGRectMake(rightX - 38, (mainH - 38) / 2.0, 38, 38);
-    _bookmarkButton.frame = CGRectMake(rightX - 30, mainH - 28, 24, 24);
-    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 52, mainH - 12);
+    _bookmarkButton.frame = CGRectMake(rightX - 38 - 30, (mainH - 26) / 2.0, 26, 26);
+    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 104, mainH - 12);
 
     CGFloat y = 4 + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
