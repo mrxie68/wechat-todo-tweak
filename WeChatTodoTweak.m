@@ -349,6 +349,8 @@ static void runTodoContactCleanupOnce(void) {
 
 #pragma mark - 底部菜单加“待办”tab
 
+static void diagLog(NSString *fmt, ...); // 前向声明（定义在下方）
+
 // 崩溃自恢复：启动时标记，若 45 秒内没有清除（说明可能崩了），下次跳过 tab 注入
 static BOOL todoTabCrashGuard(void) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
