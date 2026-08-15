@@ -1255,6 +1255,7 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
 
 static void (*orig_AsyncOnAddMsg)(id, SEL, id, CMessageWrap *);
 static void (*orig_MainThreadNotifyToExt)(id, SEL, NSDictionary *);
+static void (*orig_drawingBlockForImage)(id, SEL, id);
 
 static void swz_AsyncOnAddMsg(id self, SEL _cmd, id arg1, CMessageWrap *wrap) {
     if (orig_AsyncOnAddMsg) orig_AsyncOnAddMsg(self, _cmd, arg1, wrap);
@@ -1271,6 +1272,53 @@ static void swz_MainThreadNotifyToExt(id self, SEL _cmd, NSDictionary *ext) {
         }
     } @catch (NSException *e) {
         NSLog(kAITodoLogPrefix "MainThreadNotifyToExt 异常: %@", e);
+    }
+}
+
+// 给待办联系人画一个自定义头像（纯客户端显示，不影响其他好友）
+static id swz_drawingBlockForImage(id self, SEL _cmd, id image) {
+    NSString *usrName = nil;
+    @try {
+        usrName = [self valueForKey:@"usrName"];
+    } @catch (NSException *e) {}
+    if ([usrName isEqualToString:kAITodoChatId]) {
+        return ^void(CGContextRef context, CGSize size) {
+            if (size.width <= 0 || size.height <= 0) return;
+            // 绿色圆角底
+            CGContextSetFillColorWithColor(context,
+                                           [UIColor systemGreenColor].CGColor);
+            CGContextFillRect(context, CGRectMake(0, 0, size.width, size.height));
+            // 白色“待办”文字
+            UIGraphicsPushContext(context);
+            NSString *text = @"待办";
+            NSDictionary *attrs = @{
+                NSFontAttributeName: [UIFont boldSystemFontOfSize:size.width * 0.32],
+                NSForegroundColorAttributeName: [UIColor whiteColor],
+            };
+            CGSize ts = [text sizeWithAttributes:attrs];
+            [text drawAtPoint:CGPointMake((size.width - ts.width) / 2.0,
+                                          (size.height - ts.height) / 2.0)
+               withAttributes:attrs];
+            UIGraphicsPopContext();
+        };
+    }
+    if (orig_drawingBlockForImage) {
+        return orig_drawingBlockForImage(self, _cmd, image);
+    }
+    return nil;
+}
+
+static void installFICHeadHook(void) {
+    static BOOL g_ficHooked = NO;
+    if (g_ficHooked) return;
+    Class baseCls = NSClassFromString(@"MMFICBaseHeadImage");
+    if (!baseCls) return;
+    Method m = class_getInstanceMethod(baseCls, @selector(drawingBlockForImage:));
+    if (m) {
+        orig_drawingBlockForImage = (void *)method_getImplementation(m);
+        method_setImplementation(m, (IMP)swz_drawingBlockForImage);
+        g_ficHooked = YES;
+        NSLog(kAITodoLogPrefix "头像 hook 安装成功（MMFICBaseHeadImage drawingBlockForImage:）");
     }
 }
 
@@ -1521,6 +1569,13 @@ static void WeChatTodoInit(void) {
                                                   usingBlock:^(NSNotification *note) {
         retryInstall(10);
         registerWithWCPlugins(10);
+        // 头像 hook：FIC 类加载较晚，多试几次
+        for (int i = 1; i <= 6; i++) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 2.0 * NSEC_PER_SEC)),
+                           dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                installFICHeadHook();
+            });
+        }
         // 启动后自动重新应用待办联系人修复（好友标记+昵称+备注），解决重启后失效
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)),
                        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -1559,4 +1614,5 @@ static void WeChatTodoInit(void) {
 
     retryInstall(10);
     registerWithWCPlugins(10);
+    installFICHeadHook();
 }
