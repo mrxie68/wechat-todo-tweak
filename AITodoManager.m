@@ -23,10 +23,18 @@ static NSString * const kAITodoModelListKey = @"WeChatTodoModels_";
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSData *data = [defaults dataForKey:[self modelListKey]];
     if (data) {
-        NSSet *classes = [NSSet setWithObjects:[NSArray class], [NSMutableArray class],
-                          [MainTodoItem class], [SubTaskItem class], nil];
-        NSArray *arr = [NSKeyedUnarchiver unarchivedObjectOfClasses:classes fromData:data error:nil];
-        return [NSMutableArray arrayWithArray:arr ?: @[]];
+        @try {
+            NSSet *classes = [NSSet setWithObjects:[NSArray class], [NSMutableArray class],
+                              [MainTodoItem class], [SubTaskItem class], nil];
+            NSError *err = nil;
+            NSArray *arr = [NSKeyedUnarchiver unarchivedObjectOfClasses:classes fromData:data error:&err];
+            if (arr) {
+                return [NSMutableArray arrayWithArray:arr];
+            }
+            NSLog(kAITodoLogPrefix "模型反序列化失败: %@", err);
+        } @catch (NSException *e) {
+            NSLog(kAITodoLogPrefix "模型反序列化异常: %@", e);
+        }
     }
     // 迁移旧版字典数据
     NSArray *old = [defaults arrayForKey:[self oldListKey]];
@@ -51,17 +59,23 @@ static NSString * const kAITodoModelListKey = @"WeChatTodoModels_";
     return models;
 }
 
-+ (void)saveTodos:(NSArray<MainTodoItem *> *)todos {
-    NSError *error = nil;
-    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:todos
-                                         requiringSecureCoding:YES
-                                                         error:&error];
-    if (data) {
-        [[NSUserDefaults standardUserDefaults] setObject:data forKey:[self modelListKey]];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-    } else {
-        NSLog(kAITodoLogPrefix "保存失败: %@", error);
++ (BOOL)saveTodos:(NSArray<MainTodoItem *> *)todos {
+    @try {
+        NSError *error = nil;
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:todos
+                                             requiringSecureCoding:YES
+                                                             error:&error];
+        if (data) {
+            [[NSUserDefaults standardUserDefaults] setObject:data forKey:[self modelListKey]];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            return YES;
+        } else {
+            NSLog(kAITodoLogPrefix "保存失败: %@", error);
+        }
+    } @catch (NSException *e) {
+        NSLog(kAITodoLogPrefix "保存异常: %@", e);
     }
+    return NO;
 }
 
 + (MainTodoItem *)todoWithId:(NSInteger)todoId inList:(NSArray *)list {
@@ -103,7 +117,7 @@ static NSString * const kAITodoModelListKey = @"WeChatTodoModels_";
     item.title = content;
     item.createTime = date ?: [NSDate date];
     [list addObject:item];
-    [self saveTodos:list];
+    if (![self saveTodos:list]) return nil;
     [self syncToMemosAsync];
     return item;
 }

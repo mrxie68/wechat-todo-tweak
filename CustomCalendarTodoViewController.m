@@ -355,11 +355,60 @@
                                          handler:^(UIAlertAction *action) {
         NSString *text = [al.textFields.firstObject.text stringByTrimmingCharactersInSet:
                           [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (text.length == 0) return;
-        [AITodoManager addTodo:text atDate:[self dateOnSelectedDayAtCurrentTime]];
-        [self reloadList];
+        if (text.length == 0) {
+            [self showToast:@"内容不能为空"];
+            return;
+        }
+        MainTodoItem *item = [AITodoManager addTodo:text atDate:[self dateOnSelectedDayAtCurrentTime]];
+        if (item) {
+            [self reloadList];
+            [self scrollToTodoId:item.identifier];
+            [self showToast:@"✅ 已添加"];
+            if (@available(iOS 10.0, *)) {
+                UIImpactFeedbackGenerator *g =
+                    [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+                [g impactOccurred];
+            }
+        } else {
+            [self showToast:@"⚠️ 添加失败，请重试"];
+        }
     }]];
     [self presentViewController:al animated:YES completion:nil];
+}
+
+- (void)scrollToTodoId:(NSInteger)todoId {
+    for (NSUInteger i = 0; i < self.listTodos.count; i++) {
+        if (self.listTodos[i].identifier == todoId) {
+            [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:i inSection:0]
+                                  atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+            return;
+        }
+    }
+}
+
+- (void)showToast:(NSString *)message {
+    CGFloat w = self.view.bounds.size.width;
+    UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake((w - 180) / 2.0,
+                                                               self.view.safeAreaInsets.top + 64,
+                                                               180, 36)];
+    toast.text = message;
+    toast.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    toast.textColor = [UIColor whiteColor];
+    toast.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.88];
+    toast.layer.cornerRadius = 18;
+    toast.clipsToBounds = YES;
+    toast.textAlignment = NSTextAlignmentCenter;
+    toast.alpha = 0;
+    [self.view addSubview:toast];
+    [UIView animateWithDuration:0.25 animations:^{
+        toast.alpha = 1;
+    } completion:^(BOOL finished) {
+        [UIView animateWithDuration:0.4 delay:1.2 options:0 animations:^{
+            toast.alpha = 0;
+        } completion:^(BOOL done) {
+            [toast removeFromSuperview];
+        }];
+    }];
 }
 
 - (NSDate *)dateOnSelectedDayAtCurrentTime {
