@@ -742,6 +742,10 @@ extern void todoCloseOverlay(void);  // 由 WeChatTodoTweak.m 提供
     [super viewDidLayoutSubviews];
     CGRect b = self.view.bounds;
     UIEdgeInsets sa = self.view.safeAreaInsets;
+    // 内嵌打开时子视图安全区顶部可能为 0，用窗口安全区兜底，避免顶部上天
+    if (sa.top <= 0) {
+        sa.top = [UIApplication sharedApplication].keyWindow.safeAreaInsets.top;
+    }
     CGFloat w = b.size.width;
 
     // 顶栏：只留关闭 + 添加
