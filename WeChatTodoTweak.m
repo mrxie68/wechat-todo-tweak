@@ -42,6 +42,32 @@
 - (void)AddMsg:(NSString *)chatId MsgWrap:(CMessageWrap *)wrap;
 @end
 
+// 微信私有服务/联系人接口声明（与主项目一致，避免编译器找不到 selector）
+@interface MMServiceCenter : NSObject
++ (instancetype)defaultCenter;
+- (id)getService:(Class)cls;
+@end
+
+@interface CContactMgr : NSObject
+- (id)getSelfContact;
+@end
+
+@interface CContact : NSObject
+@property (nonatomic, retain) NSString *m_nsUsrName;
+@end
+
+@interface SettingUtil : NSObject
++ (NSString *)getCurUsrName;
+@end
+
+@interface WCPluginsMgr : NSObject
++ (instancetype)sharedInstance;
+- (void)registerControllerWithTitle:(NSString *)title
+                            version:(NSString *)version
+                         controller:(NSString *)controller;
+- (void)registerSwitchWithTitle:(NSString *)title key:(NSString *)key;
+@end
+
 static NSString *ensureTodoSessionDiagnostic(void); // 前向声明（定义在下方）
 
 #pragma mark - 基础工具
