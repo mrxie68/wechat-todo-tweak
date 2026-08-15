@@ -380,6 +380,25 @@ static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table) {
     return cols;
 }
 
+// 返回表字段结构（带必填标记），如：UserName(必填), NickName, OrderFlag(必填)
+static NSString *aiSQLiteColumnInfo(sqlite3 *db, NSString *table) {
+    NSMutableArray *parts = [NSMutableArray array];
+    NSString *safe = [table stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+    NSString *sql = [NSString stringWithFormat:@"PRAGMA table_info(\"%@\")", safe];
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, [sql UTF8String], -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char *name = sqlite3_column_text(stmt, 1);
+            int notnull = sqlite3_column_int(stmt, 3);
+            if (!name) continue;
+            NSString *n = [NSString stringWithUTF8String:(const char *)name];
+            [parts addObject:notnull ? [n stringByAppendingString:@"(必填)"] : n];
+        }
+    }
+    sqlite3_finalize(stmt);
+    return [parts componentsJoinedByString:@", "];
+}
+
 static NSArray *aiFindDatabaseFiles(void) {
     NSMutableArray *files = [NSMutableArray array];
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -426,6 +445,7 @@ static NSArray *aiFindDatabaseFiles(void) {
 // 待办联系人的展示后续改用 UI 插行方案，不走数据库写入。
 static NSString *ensureTodoSessionDiagnostic(void) {
     NSMutableArray *candidateTables = [NSMutableArray array];
+    NSString *sessionTableColumns = @"";
     NSInteger sessionCount = 0, chatCount = 0;
     NSArray *dbs = aiFindDatabaseFiles();
     for (NSDictionary *d in dbs) {
@@ -443,6 +463,12 @@ static NSString *ensureTodoSessionDiagnostic(void) {
             BOOL isChatLike = [lower rangeOfString:@"chat"].location != NSNotFound;
             if (isSessionLike || isChatLike) {
                 if (isSessionLike) sessionCount++; else chatCount++;
+                // 记录第一张会话表（SessionTable/session.db）的字段结构
+                if (isSessionLike && sessionTableColumns.length == 0 &&
+                    [d[@"path"].lowercaseString containsString:@"session"]) {
+                    sessionTableColumns = [NSString stringWithFormat:
+                                           @"\n%@ 列：%@", tbl, aiSQLiteColumnInfo(db, tbl)];
+                }
                 if (candidateTables.count < 15) {
                     [candidateTables addObject:[NSString stringWithFormat:@"%@(%@)", tbl,
                                                 [d[@"path"] lastPathComponent]]];
@@ -459,8 +485,8 @@ static NSString *ensureTodoSessionDiagnostic(void) {
             list = [list stringByAppendingFormat:@"…等共 %ld 张", (long)total];
         }
         return [NSString stringWithFormat:
-                @"只读探测完成：会话类表 %ld 张 / 聊天类表 %ld 张\n示例：%@\n写入已禁用（防闪退），待办联系人将改用 UI 插行方案。",
-                (long)sessionCount, (long)chatCount, list];
+                @"只读探测完成：会话类表 %ld 张 / 聊天类表 %ld 张\n示例：%@%@\n待办联系人方案评估中（只读，未做任何写入）。",
+                (long)sessionCount, (long)chatCount, list, sessionTableColumns];
     }
     return @"只读探测：未找到 session/chat 相关表；写入已禁用（防闪退）。";
 }
