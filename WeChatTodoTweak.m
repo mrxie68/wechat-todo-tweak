@@ -96,7 +96,15 @@ static NSArray *aiSQLiteColumns(sqlite3 *db, NSString *table);
 static UIViewController *tweakTopViewController(void); // 前向声明（定义在下方）
 
 @interface WeChatTodoHandler : NSObject
++ (void)handleIncomingMessage:(CMessageWrap *)wrap;
++ (void)noteReplySent:(NSString *)text chatId:(NSString *)chatId;
++ (BOOL)isRecentReply:(NSString *)text chatId:(NSString *)chatId;
 + (void)sendReply:(NSString *)text chatId:(NSString *)chatId;
++ (void)presentAlertWithTitle:(NSString *)title message:(NSString *)message;
++ (NSString *)todoSessionDiagnostic;
++ (NSString *)createTodoSessionDiagnostic;
++ (NSString *)removeTodoSessionDiagnostic;
++ (NSString *)uiProbeDiagnostic;
 @end
 
 // 找到聊天列表主界面 VC（NewMainFrameViewController）
@@ -408,18 +416,6 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     }
     return NO;
 }
-
-@interface WeChatTodoHandler : NSObject
-+ (void)handleIncomingMessage:(CMessageWrap *)wrap;
-+ (void)noteReplySent:(NSString *)text chatId:(NSString *)chatId;
-+ (BOOL)isRecentReply:(NSString *)text chatId:(NSString *)chatId;
-+ (void)sendReply:(NSString *)text chatId:(NSString *)chatId;
-+ (void)presentAlertWithTitle:(NSString *)title message:(NSString *)message;
-+ (NSString *)todoSessionDiagnostic;
-+ (NSString *)createTodoSessionDiagnostic;
-+ (NSString *)removeTodoSessionDiagnostic;
-+ (NSString *)uiProbeDiagnostic;
-@end
 
 @implementation WeChatTodoHandler
 
