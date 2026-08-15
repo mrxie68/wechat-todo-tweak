@@ -471,13 +471,11 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     return [cal dateFromComponents:d];
 }
 
-// 刷新某一行（勾选子任务后触发划线动画）
+// 刷新列表：操作后从磁盘重新读取最新数据，避免用旧对象刷新导致改动不显示
 - (void)reloadRowForTodo:(MainTodoItem *)todo {
-    NSUInteger idx = [self.listTodos indexOfObject:todo];
-    if (idx != NSNotFound) {
-        [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:idx inSection:0]]
-                              withRowAnimation:UITableViewRowAnimationFade];
-    }
+    (void)todo;
+    self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
+    [self.tableView reloadData];
 }
 
 - (void)editTitleForTodo:(MainTodoItem *)todo {

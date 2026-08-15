@@ -133,7 +133,8 @@ static UIColor *cardSelectedColor(void) {
     if (todo.isSelected) {
         for (SubTaskItem *sub in todo.subTasks) {
             UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
-            [self.cardView addSubview:row];
+            // 子任务行放在卡片下方（页面灰底上），不要背景，只有圈+文字
+            [self.contentView addSubview:row];
             UIButton *check = [UIButton buttonWithType:UIButtonTypeSystem];
             check.tag = 1;
             [check addTarget:self action:@selector(subCheckTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -198,11 +199,11 @@ static UIColor *cardSelectedColor(void) {
     CGFloat timeW = 44;
     _timeLabel.frame = CGRectMake(12, (h - 18) / 2.0, timeW, 18);
 
+    CGFloat mainH = 64;
     CGFloat cardX = 64;
     CGFloat cardW = w - cardX - 12;
-    _cardView.frame = CGRectMake(cardX, 4, cardW, h - 8);
+    _cardView.frame = CGRectMake(cardX, 4, cardW, mainH);
 
-    CGFloat mainH = 64;
     CGFloat iconSize = 34;
     _iconBg.frame = CGRectMake(12, (mainH - iconSize) / 2.0, iconSize, iconSize);
     _iconView.frame = CGRectInset(_iconBg.bounds, 8, 8);
@@ -212,14 +213,14 @@ static UIColor *cardSelectedColor(void) {
     _bookmarkButton.frame = CGRectMake(rightX - 30, mainH - 28, 24, 24);
     _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 52, mainH - 12);
 
-    CGFloat y = mainH;
+    CGFloat y = 4 + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {
         UIView *row = _subRows[i];
-        row.frame = CGRectMake(0, y, cardW, 34);
+        row.frame = CGRectMake(cardX + 14, y, cardW - 14, 34);
         UIButton *check = [row viewWithTag:1];
         UILabel *label = [row viewWithTag:2];
-        check.frame = CGRectMake(14, 6, 24, 24);
-        label.frame = CGRectMake(44, 0, cardW - 44 - 34, 34);
+        check.frame = CGRectMake(0, 6, 24, 24);
+        label.frame = CGRectMake(32, 0, row.bounds.size.width - 32, 34);
 
         SubTaskItem *sub = (i < _todo.subTasks.count) ? _todo.subTasks[i] : nil;
         if (sub) {
@@ -248,7 +249,7 @@ static UIColor *cardSelectedColor(void) {
 + (CGFloat)heightForTodo:(MainTodoItem *)todo width:(CGFloat)width {
     CGFloat mainH = 64;
     CGFloat subH = todo.isSelected ? todo.subTasks.count * 34.0 : 0;
-    return mainH + subH + 8;
+    return 4 + mainH + 4 + subH + 4;
 }
 
 @end
