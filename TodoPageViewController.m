@@ -136,8 +136,8 @@ static NSString *todoDateString(double ts) {
 
     self.heroGradient = [CAGradientLayer layer];
     self.heroGradient.colors = @[
-        (id)[UIColor colorWithRed:0.23 green:0.78 blue:0.47 alpha:1.0].CGColor,
-        (id)[UIColor colorWithRed:0.03 green:0.70 blue:0.38 alpha:1.0].CGColor,
+        (id)kAITodoAccentLight.CGColor,
+        (id)kAITodoAccentDark.CGColor,
     ];
     self.heroGradient.startPoint = CGPointMake(0, 0.5);
     self.heroGradient.endPoint = CGPointMake(1, 0.5);
@@ -249,7 +249,7 @@ static NSString *todoDateString(double ts) {
     UIImage *plus = [UIImage systemImageNamed:@"plus"];
     [self.addButton setImage:plus forState:UIControlStateNormal];
     self.addButton.tintColor = [UIColor whiteColor];
-    self.addButton.backgroundColor = [UIColor systemGreenColor];
+    self.addButton.backgroundColor = kAITodoAccentColor;
     self.addButton.layer.cornerRadius = 18;
     [self.addButton addTarget:self
                        action:@selector(addTapped)
@@ -427,7 +427,7 @@ static NSString *todoDateString(double ts) {
         CGFloat x = b.tag * (w / 3.0);
         b.frame = CGRectMake(x + 3, 3, w / 3.0 - 6, h - 6);
         BOOL sel = (b.tag == self.segmentIndex);
-        b.backgroundColor = sel ? [UIColor systemGreenColor] : [UIColor clearColor];
+        b.backgroundColor = sel ? kAITodoAccentColor : [UIColor clearColor];
         [b setTitleColor:sel ? [UIColor whiteColor]
                             : [UIColor secondaryLabelColor]
                 forState:UIControlStateNormal];
@@ -523,7 +523,7 @@ static NSString *todoDateString(double ts) {
         [self reloadItems];
         completion(YES);
     }];
-    toggleAction.backgroundColor = [UIColor systemGreenColor];
+    toggleAction.backgroundColor = kAITodoAccentColor;
 
     UIContextualAction *deleteAction = [UIContextualAction
         contextualActionWithStyle:UIContextualActionStyleDestructive

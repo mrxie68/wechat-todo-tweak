@@ -45,7 +45,7 @@ static NSString *todoDetailDateString(double ts) {
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone
                                         target:self action:@selector(saveTapped)];
-    self.navigationItem.rightBarButtonItem.tintColor = [UIColor systemGreenColor];
+    self.navigationItem.rightBarButtonItem.tintColor = kAITodoAccentColor;
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -84,7 +84,7 @@ static NSString *todoDetailDateString(double ts) {
     UILabel *importantTitle = [self makeRowLabel:@"重要"];
     [importantRow addSubview:importantTitle];
     self.importantSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-    self.importantSwitch.onTintColor = [UIColor systemGreenColor];
+    self.importantSwitch.onTintColor = kAITodoAccentColor;
     self.importantSwitch.on = [self.todo[@"important"] boolValue];
     [importantRow addSubview:self.importantSwitch];
 
@@ -95,7 +95,7 @@ static NSString *todoDetailDateString(double ts) {
     UILabel *doneTitle = [self makeRowLabel:@"已完成"];
     [doneRow addSubview:doneTitle];
     self.doneSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-    self.doneSwitch.onTintColor = [UIColor systemGreenColor];
+    self.doneSwitch.onTintColor = kAITodoAccentColor;
     self.doneSwitch.on = [self.todo[@"done"] boolValue];
     [doneRow addSubview:self.doneSwitch];
 

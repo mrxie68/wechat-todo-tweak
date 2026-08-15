@@ -1,4 +1,5 @@
 #import "TodoTableViewCell.h"
+#import "AIConfig.h"
 
 @implementation TodoTableViewCell
 
@@ -49,7 +50,7 @@
     if (!img) img = [UIImage systemImageNamed:done ? @"checkmark.circle" : @"circle"];
     img = [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     [_checkButton setImage:img forState:UIControlStateNormal];
-    _checkButton.tintColor = done ? [UIColor systemGreenColor] : [UIColor systemGray3Color];
+    _checkButton.tintColor = done ? kAITodoAccentColor : [UIColor systemGray3Color];
 
     if (done) {
         _contentLabel.attributedText =
