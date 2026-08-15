@@ -21,7 +21,7 @@ clang \
   -lsqlite3 \
   -o wechat-todo.dylib \
   AISettings.m AITodoManager.m SubTaskItem.m MainTodoItem.m \
-  TodoMarkdown.m TodoEditorViewController.m \
+  TodoEditorViewController.m \
   TodoSettingsViewController.m CustomCalendarTodoViewController.m CustomTodoTableViewCell.m WeChatTodoTweak.m
 
 codesign -f -s - wechat-todo.dylib || true

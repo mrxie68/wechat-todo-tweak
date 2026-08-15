@@ -1,19 +1,13 @@
 #import "TodoEditorViewController.h"
-#import "TodoMarkdown.h"
 #import "AIConfig.h"
-#import <objc/runtime.h>
 
-static char kMdStartKey;
-static char kMdEndKey;
-
-@interface TodoEditorViewController ()
+@interface TodoEditorViewController () <UITextViewDelegate>
 @property (nonatomic, copy) NSString *editorTitle;
+@property (nonatomic, copy) NSString *initialText;
 @property (nonatomic, copy) void (^completion)(NSString *text);
 @property (nonatomic, strong) UITextView *textView;
-@property (nonatomic, strong) UIView *toolbar;
-@property (nonatomic, strong) NSString *rawText;
-@property (nonatomic, assign) BOOL previewing;
-@property (nonatomic, strong) NSArray *toolButtons;
+@property (nonatomic, strong) UILabel *placeholderLabel;
+@property (nonatomic, strong) UILabel *countLabel;
 @property (nonatomic, assign) CGFloat keyboardInset;
 @end
 
@@ -25,8 +19,8 @@ static char kMdEndKey;
     self = [super init];
     if (self) {
         _editorTitle = [title copy];
-        _rawText = [text copy] ?: @"";
         _completion = [completion copy];
+        _initialText = [text copy] ?: @"";
     }
     return self;
 }
@@ -45,52 +39,36 @@ static char kMdEndKey;
                                         target:self action:@selector(saveTapped)];
     self.navigationItem.rightBarButtonItem.tintColor = kAITodoAccentColor;
 
-    // 文本框
+    // 大圆角文本框
     self.textView = [[UITextView alloc] initWithFrame:CGRectZero];
     self.textView.font = [UIFont systemFontOfSize:16];
-    self.textView.text = self.rawText;
+    self.textView.text = self.initialText;
     self.textView.backgroundColor = [UIColor systemBackgroundColor];
-    self.textView.layer.cornerRadius = 14;
-    self.textView.textContainerInset = UIEdgeInsetsMake(12, 10, 12, 10);
+    self.textView.layer.cornerRadius = 16;
+    self.textView.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.textView.layer.shadowOpacity = 0.05;
+    self.textView.layer.shadowOffset = CGSizeMake(0, 2);
+    self.textView.layer.shadowRadius = 8;
+    self.textView.textContainerInset = UIEdgeInsetsMake(16, 12, 16, 12);
     self.textView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    self.textView.delegate = self;
     [self.view addSubview:self.textView];
 
-    // 底部工具条
-    self.toolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    self.toolbar.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    [self.view addSubview:self.toolbar];
+    // 占位提示
+    self.placeholderLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.placeholderLabel.text = @"写点什么…";
+    self.placeholderLabel.font = [UIFont systemFontOfSize:16];
+    self.placeholderLabel.textColor = [UIColor systemGray3Color];
+    self.placeholderLabel.hidden = (self.initialText.length > 0);
+    [self.view addSubview:self.placeholderLabel];
 
-    NSArray *defs = @[
-        @{@"t": @"B",   @"s": @"**", @"a": @""},
-        @{@"t": @"I",   @"s": @"*",  @"a": @""},
-        @{@"t": @"H",   @"s": @"\n# ", @"a": @""},
-        @{@"t": @"•",   @"s": @"\n- ", @"a": @""},
-        @{@"t": @"☑",   @"s": @"\n- [ ] ", @"a": @""},
-        @{@"t": @"`",   @"s": @"`",  @"a": @""},
-        @{@"t": @"~~",  @"s": @"~~", @"a": @""},
-    ];
-    NSMutableArray *btns = [NSMutableArray array];
-    for (NSDictionary *d in defs) {
-        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-        [b setTitle:d[@"t"] forState:UIControlStateNormal];
-        b.titleLabel.font = [UIFont boldSystemFontOfSize:15];
-        b.layer.cornerRadius = 8;
-        b.backgroundColor = [UIColor systemBackgroundColor];
-        objc_setAssociatedObject(b, &kMdStartKey, d[@"s"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject(b, &kMdEndKey, d[@"a"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [b addTarget:self action:@selector(toolTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self.toolbar addSubview:b];
-        [btns addObject:b];
-    }
-    UIButton *preview = [UIButton buttonWithType:UIButtonTypeSystem];
-    [preview setTitle:@"预览" forState:UIControlStateNormal];
-    preview.titleLabel.font = [UIFont systemFontOfSize:13];
-    preview.layer.cornerRadius = 8;
-    preview.backgroundColor = kAITodoAccentColor;
-    [preview setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [preview addTarget:self action:@selector(togglePreview) forControlEvents:UIControlEventTouchUpInside];
-    [self.toolbar addSubview:preview];
-    self.toolButtons = @[preview];
+    // 字数统计
+    self.countLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.countLabel.font = [UIFont systemFontOfSize:12];
+    self.countLabel.textColor = [UIColor secondaryLabelColor];
+    self.countLabel.textAlignment = NSTextAlignmentRight;
+    [self.view addSubview:self.countLabel];
+    [self updateCount];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(keyboardWillChange:)
@@ -110,79 +88,26 @@ static char kMdEndKey;
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGRect b = self.view.bounds;
-    UIEdgeInsets sa = self.view.safeAreaInsets;
-    CGFloat toolH = 46;
-    CGFloat toolBottom = b.size.height - self.keyboardInset;
-    CGFloat toolBarH = toolH + (self.keyboardInset > 0 ? 0 : sa.bottom);
-    self.toolbar.frame = CGRectMake(0, toolBottom - toolBarH, b.size.width, toolBarH);
-    self.textView.frame = CGRectMake(16, 12, b.size.width - 32,
-                                     CGRectGetMinY(self.toolbar.frame) - 24);
-
-    // 工具按钮布局：8 个按钮等分
-    NSArray *all = [self.toolbar.subviews filteredArrayUsingPredicate:
-                    [NSPredicate predicateWithBlock:^BOOL(id obj, NSDictionary *bindings) {
-        return [obj isKindOfClass:[UIButton class]];
-    }]];
-    CGFloat bw = (b.size.width - 16) / all.count;
-    for (NSUInteger i = 0; i < all.count; i++) {
-        UIButton *btn = all[i];
-        btn.frame = CGRectMake(8 + i * bw, 6, bw - 8, 34);
-    }
+    CGFloat bottom = b.size.height - self.keyboardInset;
+    self.textView.frame = CGRectMake(16, 12, b.size.width - 32, bottom - 12 - 34);
+    self.placeholderLabel.frame = CGRectMake(16 + 12 + 4, 12 + 16 + 2,
+                                             b.size.width - 32 - 32, 24);
+    self.countLabel.frame = CGRectMake(16, CGRectGetMaxY(self.textView.frame) + 6,
+                                       b.size.width - 32, 20);
 }
 
-- (void)toolTapped:(UIButton *)sender {
-    if (self.previewing) return;
-    NSString *start = objc_getAssociatedObject(sender, &kMdStartKey);
-    NSString *end = objc_getAssociatedObject(sender, &kMdEndKey) ?: @"";
-    if ([start hasPrefix:@"\n"]) {
-        // 行前缀（标题/列表/任务项）：插到当前行首
-        [self insertLinePrefix:start];
-        return;
-    }
-    [self wrapSelectionWith:start end:end];
+- (void)textViewDidChange:(UITextView *)textView {
+    self.placeholderLabel.hidden = (textView.text.length > 0);
+    [self updateCount];
 }
 
-- (void)wrapSelectionWith:(NSString *)start end:(NSString *)end {
-    NSRange sel = self.textView.selectedRange;
-    NSString *text = self.textView.text;
-    if (sel.location == NSNotFound) sel = NSMakeRange(text.length, 0);
-    NSString *selText = (sel.length > 0) ? [text substringWithRange:sel] : @"";
-    NSString *replacement = [NSString stringWithFormat:@"%@%@%@", start, selText, end];
-    self.textView.text = [text stringByReplacingCharactersInRange:sel withString:replacement];
-    self.textView.selectedRange = NSMakeRange(sel.location + start.length + selText.length, 0);
-}
-
-- (void)insertLinePrefix:(NSString *)prefix {
-    NSRange sel = self.textView.selectedRange;
-    NSString *text = self.textView.text;
-    if (sel.location == NSNotFound) sel = NSMakeRange(text.length, 0);
-    NSRange line = [text lineRangeForRange:sel];
-    NSString *lineText = [text substringWithRange:line];
-    NSString *newText = [text stringByReplacingCharactersInRange:line
-                                                      withString:[prefix stringByAppendingString:lineText]];
-    self.textView.text = newText;
-    self.textView.selectedRange = NSMakeRange(line.location + prefix.length, 0);
-}
-
-- (void)togglePreview {
-    self.previewing = !self.previewing;
-    UIButton *preview = self.toolButtons.firstObject;
-    if (self.previewing) {
-        self.rawText = self.textView.text;
-        self.textView.attributedText = todoMarkdownString(self.rawText, 16);
-        self.textView.editable = NO;
-        [self.textView resignFirstResponder];
-        [preview setTitle:@"编辑" forState:UIControlStateNormal];
-    } else {
-        self.textView.editable = YES;
-        self.textView.text = self.rawText;
-        [preview setTitle:@"预览" forState:UIControlStateNormal];
-    }
+- (void)updateCount {
+    self.countLabel.text = [NSString stringWithFormat:@"%lu 字",
+                            (unsigned long)self.textView.text.length];
 }
 
 - (void)saveTapped {
-    NSString *text = self.previewing ? self.rawText : self.textView.text;
-    if (self.completion) self.completion(text ?: @"");
+    if (self.completion) self.completion(self.textView.text ?: @"");
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 

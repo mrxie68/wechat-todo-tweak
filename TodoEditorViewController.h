@@ -1,6 +1,6 @@
 #import <UIKit/UIKit.h>
 
-// Markdown 编辑页：大文本框 + 格式工具条 + 预览
+// 简洁漂亮的编辑页：大圆角文本框 + 占位提示 + 字数统计
 @interface TodoEditorViewController : UIViewController
 
 - (instancetype)initWithTitle:(NSString *)title
