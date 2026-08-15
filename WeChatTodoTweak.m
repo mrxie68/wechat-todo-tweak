@@ -301,6 +301,16 @@ static NSString *createTodoSessionOnMain(void) {
                         } else {
                             [existing setValue:kAITodoNickName forKey:@"m_nsRemark"];
                         }
+                        // 尝试把联系人标记为好友，隐藏“对方还不是你的朋友”
+                        @try {
+                            NSNumber *type = [existing valueForKey:@"m_uiType"];
+                            unsigned int t = type ? type.unsignedIntValue : 0;
+                            [existing setValue:@(t | 1) forKey:@"m_uiType"];
+                            [existing setValue:@NO forKey:@"m_bNeedContactVerify"];
+                            if ([existing valueForKey:@"m_bIsFriend"] != nil) {
+                                [existing setValue:@YES forKey:@"m_bIsFriend"];
+                            }
+                        } @catch (NSException *e) {}
                         NSArray *updateSels = @[@"updateContact:", @"modifyContact:", @"saveContact:",
                                                 @"addOrUpdateContact:", @"updateContact:", @"modifyContact:"];
                         for (NSString *selName in updateSels) {
@@ -966,6 +976,29 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
     if (frames.count > 0) {
         [lines addObject:@"== 主界面候选 =="];
         [lines addObject:[frames componentsJoinedByString:@"、"]];
+    }
+
+    // 3.5 头像存储路径探测（替换头像需要知道文件位置和命名）
+    NSString *docDir = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+    NSDirectoryEnumerator *en = [[NSFileManager defaultManager] enumeratorAtPath:docDir];
+    NSMutableArray *avatarPaths = [NSMutableArray array];
+    int scanned = 0;
+    for (NSString *rel in en) {
+        if (++scanned > 50000) break;
+        NSString *lower = rel.lowercaseString;
+        if ([lower rangeOfString:@"avatar"].location != NSNotFound ||
+            [lower rangeOfString:@"headimg"].location != NSNotFound ||
+            [lower rangeOfString:@"head_img"].location != NSNotFound) {
+            if (avatarPaths.count < 10) [avatarPaths addObject:rel];
+        }
+    }
+    if (avatarPaths.count > 0) {
+        [lines addObject:@"== 头像路径（前10个）=="];
+        for (NSString *p in avatarPaths) {
+            [lines addObject:[@"  " stringByAppendingString:p]];
+        }
+    } else {
+        [lines addObject:@"== 头像路径：未找到 =="];
     }
 
     // 4. 聊天界面类（名字含 Chat + ViewController，打开过聊天后应该已加载）
