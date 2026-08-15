@@ -23,6 +23,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     if (self) {
         self.layer.cornerRadius = 14;
         self.clipsToBounds = YES;
+        self.layer.borderWidth = 1.0; // 1px 边框
         _weekLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _weekLabel.font = [UIFont systemFontOfSize:11];
         _weekLabel.textAlignment = NSTextAlignmentCenter;
@@ -56,11 +57,13 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     _dayLabel.text = [df stringFromDate:day];
     if (selected) {
         self.backgroundColor = kAITodoAccentColor;
+        self.layer.borderColor = kAITodoAccentDark.CGColor;
         _weekLabel.textColor = [UIColor systemBackgroundColor];
         _dayLabel.textColor = [UIColor systemBackgroundColor];
         _dotView.hidden = YES; // 选中日不显示圆点，避免出现小白圈
     } else {
         self.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+        self.layer.borderColor = [UIColor separatorColor].CGColor;
         _weekLabel.textColor = [UIColor secondaryLabelColor];
         _dayLabel.textColor = isToday ? kAITodoAccentColor : [UIColor labelColor];
         if (isToday) {
@@ -180,7 +183,8 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 
 - (void)buildCalendarCard {
     self.calendarCard = [[UIView alloc] initWithFrame:CGRectZero];
-    self.calendarCard.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    // 卡片背景用更淡的纯白，与日期小块（浅灰）区分
+    self.calendarCard.backgroundColor = [UIColor systemBackgroundColor];
     self.calendarCard.layer.cornerRadius = 16;
     self.calendarCard.layer.shadowColor = [UIColor blackColor].CGColor;
     self.calendarCard.layer.shadowOpacity = 0.05;
