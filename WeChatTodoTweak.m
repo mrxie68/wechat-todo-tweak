@@ -1019,6 +1019,42 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         [lines addObject:@"== 头像/图片路径：未找到 =="];
     }
 
+    // 3.5b 按内容（图片魔数）扫描所有真实图片文件（微信头像常不带扩展名）
+    NSMutableArray *realImages = [NSMutableArray array];
+    for (NSString *root in scanRoots) {
+        if (![fm fileExistsAtPath:root]) continue;
+        NSDirectoryEnumerator *en2 = [fm enumeratorAtPath:root];
+        int scanned2 = 0;
+        for (NSString *rel in en2) {
+            if (++scanned2 > 60000) break;
+            NSString *full = [root stringByAppendingPathComponent:rel];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:full error:nil];
+            NSNumber *size = attrs[NSFileSize];
+            if (size.longLongValue < 1024 || size.longLongValue > 20 * 1024 * 1024) continue;
+            FILE *f = fopen([full UTF8String], "rb");
+            if (!f) continue;
+            unsigned char magic[8];
+            size_t got = fread(magic, 1, 8, f);
+            fclose(f);
+            BOOL isImg = got >= 3 && magic[0] == 0xFF && magic[1] == 0xD8 && magic[2] == 0xFF; // JPEG
+            if (got >= 8 && magic[0] == 0x89 && magic[1] == 0x50 && magic[2] == 0x4E &&
+                magic[3] == 0x47) isImg = YES; // PNG
+            if (got >= 3 && magic[0] == 'G' && magic[1] == 'I' && magic[2] == 'F') isImg = YES; // GIF
+            if (isImg) {
+                [realImages addObject:[rel stringByAppendingFormat:@"(%@)", [root lastPathComponent]]];
+                if (realImages.count >= 25) break;
+            }
+        }
+    }
+    if (realImages.count > 0) {
+        [lines addObject:@"== 真实图片文件（按内容，前25个）=="];
+        for (NSString *p in realImages) {
+            [lines addObject:[@"  " stringByAppendingString:p]];
+        }
+    } else {
+        [lines addObject:@"== 真实图片文件：未找到 =="];
+    }
+
     // 3.6 头像加载类探测（hook 按用户名取头像的方法，给待办联系人伪造头像）
     NSMutableArray *headClasses = [NSMutableArray array];
     classCount = objc_getClassList(NULL, 0);
@@ -1059,6 +1095,40 @@ static BOOL isDuplicateMessage(CMessageWrap *wrap) {
         }
     } else {
         [lines addObject:@"== 头像加载类：未找到 =="];
+    }
+
+    // 3.7 所有 HeadImage/HeadImg 相关类（不按方法过滤，找渲染视图）
+    NSMutableArray *allHeadClasses = [NSMutableArray array];
+    classCount = objc_getClassList(NULL, 0);
+    if (classCount > 0) {
+        classes = (Class *)malloc(sizeof(Class) * (unsigned long)classCount);
+        objc_getClassList(classes, classCount);
+    }
+    for (int i = 0; i < classCount && allHeadClasses.count < 20; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name rangeOfString:@"HeadImage"].location == NSNotFound &&
+            [name rangeOfString:@"HeadImg"].location == NSNotFound &&
+            [name rangeOfString:@"HeadPic"].location == NSNotFound) continue;
+        if ([name hasPrefix:@"NSKVONotifying"] || [name hasPrefix:@"WAMainFrame"]) continue;
+        Class c = classes[i];
+        unsigned int mcount = 0;
+        Method *methods = class_copyMethodList(c, &mcount);
+        NSMutableArray *first = [NSMutableArray array];
+        for (unsigned int j = 0; j < mcount && first.count < 3; j++) {
+            [first addObject:NSStringFromSelector(method_getName(methods[j]))];
+        }
+        free(methods);
+        [allHeadClasses addObject:[NSString stringWithFormat:@"%@：%@",
+                                   name, [first componentsJoinedByString:@" | "]]];
+    }
+    free(classes);
+    if (allHeadClasses.count > 0) {
+        [lines addObject:@"== HeadImage 相关类（前20个）=="];
+        for (NSString *h in allHeadClasses) {
+            [lines addObject:[@"  " stringByAppendingString:h]];
+        }
+    } else {
+        [lines addObject:@"== HeadImage 相关类：未找到 =="];
     }
 
     // 4. 聊天界面类（名字含 Chat + ViewController，打开过聊天后应该已加载）
