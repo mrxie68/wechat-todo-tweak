@@ -183,8 +183,17 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 
 - (void)buildCalendarCard {
     self.calendarCard = [[UIView alloc] initWithFrame:CGRectZero];
-    // 卡片背景用更淡的纯白，与日期小块（浅灰）区分
-    self.calendarCard.backgroundColor = [UIColor systemBackgroundColor];
+    // 卡片背景用暖色淡底，突出日期小块
+    if (@available(iOS 13.0, *)) {
+        self.calendarCard.backgroundColor =
+            [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+                return trait.userInterfaceStyle == UIUserInterfaceStyleDark
+                    ? [UIColor colorWithRed:0.22 green:0.20 blue:0.17 alpha:1.0] // 暖深灰
+                    : [UIColor colorWithRed:0.99 green:0.96 blue:0.89 alpha:1.0]; // 暖米色
+            }];
+    } else {
+        self.calendarCard.backgroundColor = [UIColor colorWithRed:0.99 green:0.96 blue:0.89 alpha:1.0];
+    }
     self.calendarCard.layer.cornerRadius = 16;
     self.calendarCard.layer.shadowColor = [UIColor blackColor].CGColor;
     self.calendarCard.layer.shadowOpacity = 0.05;
@@ -223,14 +232,16 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
 
     // 底部行：全部书签（筛选视图）+ 统计
     self.bookmarkButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.bookmarkButton setTitle:@"🔖 全部书签" forState:UIControlStateNormal];
-    self.bookmarkButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
+    self.bookmarkButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.bookmarkButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
     [self.bookmarkButton addTarget:self action:@selector(toggleBookmarkMode) forControlEvents:UIControlEventTouchUpInside];
     [self.calendarCard addSubview:self.bookmarkButton];
 
     self.statsButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.statsButton setTitle:@"统计" forState:UIControlStateNormal];
-    self.statsButton.titleLabel.font = [UIFont systemFontOfSize:13];
+    [self.statsButton setTitle:@"今日统计" forState:UIControlStateNormal];
+    self.statsButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.statsButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
     [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.calendarCard addSubview:self.statsButton];
 }
@@ -381,14 +392,7 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     [self.tableView reloadData];
     [self refreshDaysWithTodos];
 
-    // 书签按钮计数
-    NSUInteger bookmarked = 0;
-    for (MainTodoItem *m in [AITodoManager allTodos]) {
-        if (m.isBookmarked) bookmarked++;
-    }
-    [self.bookmarkButton setTitle:[NSString stringWithFormat:@"🔖 全部书签（%lu）",
-                                   (unsigned long)bookmarked]
-                         forState:UIControlStateNormal];
+    [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
     self.bookmarkButton.tintColor = self.bookmarkMode ? kAITodoAccentColor : [UIColor labelColor];
 
     BOOL empty = (self.listTodos.count == 0);
@@ -690,20 +694,20 @@ extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
     title.frame = CGRectMake(100, sa.top, w - 200, 44);
 
     // 白色日历卡片：月份行 + 日期条 + 底部行（书签/统计）
-    CGFloat cardX = 16, cardW = w - 32;
+    CGFloat cardX = 24, cardW = w - 48; // 卡片整体往内收
     CGFloat cardY = sa.top + 48 + 10;
     CGFloat cardH = 12 + 32 + 8 + 78 + 8 + 32 + 12; // 182
     self.calendarCard.frame = CGRectMake(cardX, cardY, cardW, cardH);
-    self.prevMonthButton.frame = CGRectMake(12, 12, 40, 32);
-    self.nextMonthButton.frame = CGRectMake(cardW - 52, 12, 40, 32);
+    self.prevMonthButton.frame = CGRectMake(20, 12, 32, 32);
+    self.nextMonthButton.frame = CGRectMake(cardW - 52, 12, 32, 32);
     self.monthLabel.frame = CGRectMake(56, 12, cardW - 112, 32);
     self.calendarView.frame = CGRectMake(0, 52, cardW, 78);
     if (!self.didInitialScroll) {
         self.didInitialScroll = YES;
         [self scrollToSelectedDayAnimated:NO]; // 首次布局后再定位到今天，保证可见
     }
-    self.bookmarkButton.frame = CGRectMake(12, 138, 180, 32);
-    self.statsButton.frame = CGRectMake(cardW - 12 - 70, 138, 70, 32);
+    self.bookmarkButton.frame = CGRectMake(12, 138, 110, 32);
+    self.statsButton.frame = CGRectMake(cardW - 122, 138, 110, 32);
 
     CGFloat headerY = cardY + cardH + 12;
     self.listHeaderLabel.frame = CGRectMake(20, headerY, w - 40, 24);
