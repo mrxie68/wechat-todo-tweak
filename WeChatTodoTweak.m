@@ -406,17 +406,25 @@ static NSArray *aiFindDatabaseFiles(void) {
             if (!aiIsSQLiteFile(full)) continue;
             NSDictionary *attrs = [fm attributesOfItemAtPath:full error:nil];
             [files addObject:@{@"path": full, @"size": attrs[NSFileSize] ?: @0}];
-            if (files.count >= 25) break;
+            if (files.count >= 100) break;
         }
     }
     [files sortUsingComparator:^NSComparisonResult(id a, id b) {
+        NSString *ar = a[@"path"], *br = b[@"path"];
+        BOOL aSession = [ar.lowercaseString rangeOfString:@"session"].location != NSNotFound;
+        BOOL bSession = [br.lowercaseString rangeOfString:@"session"].location != NSNotFound;
+        if (aSession != bSession) return aSession ? NSOrderedAscending : NSOrderedDescending;
         return [b[@"size"] compare:a[@"size"]];
     }];
+    if (files.count > 100) {
+        files = [[files subarrayWithRange:NSMakeRange(0, 100)] mutableCopy];
+    }
     return files;
 }
 
 // 在会话库里插入“待办事项”本机会话（只在表里有 UserName 列时才写，写失败不影响微信）
 static NSString *ensureTodoSessionDiagnostic(void) {
+    NSMutableArray *candidateTables = [NSMutableArray array];
     NSArray *dbs = aiFindDatabaseFiles();
     for (NSDictionary *d in dbs) {
         sqlite3 *db = NULL;
@@ -428,9 +436,17 @@ static NSString *ensureTodoSessionDiagnostic(void) {
         sqlite3_busy_timeout(db, 3000);
         NSArray *tables = aiSQLiteTableNames(db);
         for (NSString *tbl in tables) {
-            if ([tbl.lowercaseString rangeOfString:@"session"].location == NSNotFound) continue;
+            NSString *lower = tbl.lowercaseString;
+            BOOL isSessionLike = [lower rangeOfString:@"session"].location != NSNotFound;
+            BOOL isChatLike = [lower rangeOfString:@"chat"].location != NSNotFound;
+            if (!isSessionLike && !isChatLike) continue;
             NSArray *cols = aiSQLiteColumns(db, tbl);
             if (![cols containsObject:@"UserName"]) continue;
+            if (!isSessionLike) {
+                [candidateTables addObject:[NSString stringWithFormat:@"%@(%@)", tbl,
+                                            [d[@"path"] lastPathComponent]]];
+                continue;
+            }
             NSString *nickCol = [cols containsObject:@"NickName"] ? @"NickName" : nil;
             // 已存在？
             NSString *existsSql = [NSString stringWithFormat:
@@ -474,7 +490,11 @@ static NSString *ensureTodoSessionDiagnostic(void) {
         }
         sqlite3_close(db);
     }
-    return @"未找到会话库（表名不含 session）";
+    if (candidateTables.count > 0) {
+        return [NSString stringWithFormat:@"未找到会话表（session），找到含 chat 且有 UserName 的表：%@",
+                [candidateTables componentsJoinedByString:@"、"]];
+    }
+    return @"未找到会话库（扫描到的表里没有 session/chat 相关表）";
 }
 
 #pragma mark - hook 安装 / wcplugins 注册
@@ -505,6 +525,8 @@ static void retryInstall(int remaining) {
 }
 
 static void registerWithWCPlugins(int remaining) {
+    static BOOL g_wcpluginsRegistered = NO;
+    if (g_wcpluginsRegistered) return; // 幂等：只注册一次
     Class mgrClass = NSClassFromString(@"WCPluginsMgr");
     if (mgrClass && [mgrClass respondsToSelector:@selector(sharedInstance)]) {
         id mgr = [mgrClass sharedInstance];
@@ -512,6 +534,7 @@ static void registerWithWCPlugins(int remaining) {
             [mgr registerControllerWithTitle:@"待办事项"
                                      version:kAITodoVersion
                                   controller:@"TodoSettingsViewController"];
+            g_wcpluginsRegistered = YES;
             NSLog(kAITodoLogPrefix "已注册到 wcplugins（设置页条目）");
             return;
         }
