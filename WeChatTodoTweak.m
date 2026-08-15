@@ -302,12 +302,6 @@ static NSString *createTodoSessionOnMain(void) {
                         if ([contactMgr respondsToSelector:@selector(setContact:nickName:)]) {
                             [contactMgr setContact:existing nickName:kAITodoNickName];
                         }
-                        if ([contactMgr respondsToSelector:@selector(setContact:remark:isLocal:)]) {
-                            [contactMgr setContact:existing remark:kAITodoNickName isLocal:YES];
-                        }
-                        if ([contactMgr respondsToSelector:@selector(startModifyContactUserName:remark:)]) {
-                            [contactMgr startModifyContactUserName:kAITodoChatId remark:kAITodoNickName];
-                        }
                         if ([existing respondsToSelector:@selector(setM_nsRemark:)]) {
                             [existing setM_nsRemark:kAITodoNickName];
                         } else {
@@ -1438,12 +1432,6 @@ static void WeChatTodoInit(void) {
                 [contact setValue:@NO forKey:@"m_bNeedContactVerify"];
                 if ([contactMgr respondsToSelector:@selector(setContact:nickName:)]) {
                     [contactMgr setContact:contact nickName:kAITodoNickName];
-                }
-                if ([contactMgr respondsToSelector:@selector(setContact:remark:isLocal:)]) {
-                    [contactMgr setContact:contact remark:kAITodoNickName isLocal:YES];
-                }
-                if ([contactMgr respondsToSelector:@selector(startModifyContactUserName:remark:)]) {
-                    [contactMgr startModifyContactUserName:kAITodoChatId remark:kAITodoNickName];
                 }
                 NSLog(kAITodoLogPrefix "已自动修复待办联系人（好友标记+昵称）");
             } @catch (NSException *e) {}
