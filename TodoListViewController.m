@@ -202,6 +202,10 @@
     cell.onAddSubTask = ^{
         [self addSubTaskForTodo:todo];
     };
+    cell.onToggleDone = ^{
+        [AITodoManager markTodo:todo.identifier done:!todo.done];
+        [self reloadData];
+    };
     cell.onToggleSubTask = ^(SubTaskItem *sub) {
         [AITodoManager toggleSubTask:sub.identifier inTodo:todo.identifier];
         [self reloadData];
@@ -239,6 +243,15 @@
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     MainTodoItem *todo = self.items[indexPath.row];
+    UIContextualAction *doneAction = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleNormal
+                            title:todo.done ? @"取消完成" : @"完成"
+                          handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+        [AITodoManager markTodo:todo.identifier done:!todo.done];
+        [self reloadData];
+        completion(YES);
+    }];
+    doneAction.backgroundColor = [UIColor systemGreenColor];
     UIContextualAction *bookmark = [UIContextualAction
         contextualActionWithStyle:UIContextualActionStyleNormal
                             title:todo.isBookmarked ? @"取消书签" : @"书签"
@@ -248,7 +261,7 @@
         completion(YES);
     }];
     bookmark.backgroundColor = [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0]; // 金色
-    return [UISwipeActionsConfiguration configurationWithActions:@[bookmark]];
+    return [UISwipeActionsConfiguration configurationWithActions:@[doneAction, bookmark]];
 }
 
 @end

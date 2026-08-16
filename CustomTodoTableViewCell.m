@@ -77,6 +77,11 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
         [_plusButton addTarget:self action:@selector(plusTapped) forControlEvents:UIControlEventTouchUpInside];
         [self.cardView addSubview:_plusButton];
 
+        // 完成按钮：圆圈勾选，放在加号左侧
+        _doneButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_doneButton addTarget:self action:@selector(doneTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self.cardView addSubview:_doneButton];
+
         self.cardTapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self
                                                                      action:@selector(cardTapped)];
         self.cardTapGesture.delegate = self;
@@ -96,6 +101,10 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     if (self.onToggleSelect) self.onToggleSelect();
 }
 
+- (void)doneTapped {
+    if (self.onToggleDone) self.onToggleDone();
+}
+
 - (void)cardLongPressed:(UILongPressGestureRecognizer *)gesture {
     if (gesture.state == UIGestureRecognizerStateBegan && self.onLongPress) {
         self.onLongPress();
@@ -105,7 +114,8 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
 - (void)configureWithTodo:(MainTodoItem *)todo {
     _todo = todo;
     NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"HH:mm";
+    fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+    fmt.dateFormat = @"M月d日 HH:mm";
     _timeLabel.text = [fmt stringFromDate:todo.createTime];
 
     _cardView.backgroundColor = todo.isSelected ? cardSelectedColor() : cardUnselectedColor();
@@ -139,6 +149,12 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     UIImage *plus = [UIImage systemImageNamed:@"plus.circle.fill"];
     [_plusButton setImage:plus forState:UIControlStateNormal];
     _plusButton.tintColor = [UIColor secondaryLabelColor];
+
+    // 完成按钮
+    UIImage *doneImg = [UIImage systemImageNamed:todo.done ? @"checkmark.circle.fill" : @"circle"];
+    doneImg = [doneImg imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    [_doneButton setImage:doneImg forState:UIControlStateNormal];
+    _doneButton.tintColor = todo.done ? kAITodoAccentColor : [UIColor systemGray3Color];
 
     // 子任务行（卡片下方，页面灰底，只有圈+文字）
     for (UIView *v in _subRows) [v removeFromSuperview];
@@ -232,7 +248,7 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     CGFloat cardW = w - cardX - 16;
 
     // 时间在行内左上，卡片在下面
-    _timeLabel.frame = CGRectMake(16, 4, 120, 16);
+    _timeLabel.frame = CGRectMake(16, 4, 150, 16);
 
     _cardView.frame = CGRectMake(cardX, 24, cardW, mainH);
     _bookmarkStrip.frame = CGRectMake(0, 0, cardW, 4);
@@ -241,7 +257,8 @@ static NSInteger todoSubLines(NSString *text, CGFloat width) {
     _iconBg.frame = CGRectMake(12, (mainH - iconSize) / 2.0, iconSize, iconSize);
     _iconView.frame = CGRectInset(_iconBg.bounds, 8, 8);
     _plusButton.frame = CGRectMake(cardW - 12 - 38, (mainH - 38) / 2.0, 38, 38);
-    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 60, mainH - 12);
+    _doneButton.frame = CGRectMake(cardW - 96, (mainH - 38) / 2.0, 38, 38);
+    _titleLabel.frame = CGRectMake(56, 6, cardW - 56 - 108, mainH - 12);
 
     CGFloat y = 24 + mainH + 4;
     for (NSUInteger i = 0; i < _subRows.count; i++) {

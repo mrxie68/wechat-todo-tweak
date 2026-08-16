@@ -103,6 +103,7 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 @property (nonatomic, strong) UIButton *allTodosRow;
 @property (nonatomic, strong) UIButton *bookmarkRow;
 @property (nonatomic, strong) UIButton *statsRow;
+@property (nonatomic, strong) NSArray *filterDividers;
 @property (nonatomic, strong) UILabel *allTodosValueLabel;
 @property (nonatomic, strong) UILabel *bookmarkValueLabel;
 @property (nonatomic, strong) UILabel *statsValueLabel;
@@ -237,7 +238,7 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     [self buildFilterCard];
 }
 
-// 三行筛选入口卡片（样式对齐设置页条目：标题 + 右侧数字/箭头）
+// 三个筛选入口：一行三块（全部待办 / 全部书签 / 今日统计）
 - (void)buildFilterCard {
     self.filterCard = [[UIView alloc] initWithFrame:CGRectZero];
     self.filterCard.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
@@ -245,34 +246,48 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     self.filterCard.layer.masksToBounds = YES;
     [self.view addSubview:self.filterCard];
 
-    self.allTodosRow = [self makeFilterRow:@"全部待办" action:@selector(openAllTodos)];
-    self.bookmarkRow = [self makeFilterRow:@"全部书签" action:@selector(openBookmarks)];
-    self.statsRow = [self makeFilterRow:@"今日统计" action:@selector(openStats)];
+    self.allTodosRow = [self makeFilterBlock:@"全部待办" action:@selector(openAllTodos)];
+    self.bookmarkRow = [self makeFilterBlock:@"全部书签" action:@selector(openBookmarks)];
+    self.statsRow = [self makeFilterBlock:@"今日统计" action:@selector(openStats)];
 
-    self.allTodosValueLabel = [self makeFilterValue];
-    self.bookmarkValueLabel = [self makeFilterValue];
-    self.statsValueLabel = [self makeFilterValue];
-    self.statsValueLabel.text = @"›";
+    self.allTodosValueLabel = [self makeFilterBlockValueFor:self.allTodosRow];
+    self.bookmarkValueLabel = [self makeFilterBlockValueFor:self.bookmarkRow];
+    self.statsValueLabel = [self makeFilterBlockValueFor:self.statsRow];
+
+    // 块与块之间的细分隔线
+    UIView *d1 = [[UIView alloc] initWithFrame:CGRectZero];
+    d1.backgroundColor = [UIColor separatorColor];
+    UIView *d2 = [[UIView alloc] initWithFrame:CGRectZero];
+    d2.backgroundColor = [UIColor separatorColor];
+    [self.filterCard addSubview:d1];
+    [self.filterCard addSubview:d2];
+    self.filterDividers = @[d1, d2];
 }
 
-- (UIButton *)makeFilterRow:(NSString *)title action:(SEL)action {
+- (UIButton *)makeFilterBlock:(NSString *)title action:(SEL)action {
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [btn setTitle:title forState:UIControlStateNormal];
-    [btn setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
-    btn.titleLabel.font = [UIFont systemFontOfSize:16];
-    btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    btn.titleEdgeInsets = UIEdgeInsetsMake(0, 16, 0, 0);
     [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    btn.backgroundColor = [UIColor clearColor];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    titleLabel.tag = 1;
+    titleLabel.text = title;
+    titleLabel.font = [UIFont systemFontOfSize:13];
+    titleLabel.textColor = [UIColor secondaryLabelColor];
+    titleLabel.textAlignment = NSTextAlignmentCenter;
+    [btn addSubview:titleLabel];
+
     [self.filterCard addSubview:btn];
     return btn;
 }
 
-- (UILabel *)makeFilterValue {
+- (UILabel *)makeFilterBlockValueFor:(UIButton *)block {
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
-    label.font = [UIFont systemFontOfSize:15];
-    label.textColor = [UIColor secondaryLabelColor];
-    label.textAlignment = NSTextAlignmentRight;
-    [self.filterCard addSubview:label];
+    label.tag = 2;
+    label.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
+    label.textColor = [UIColor labelColor];
+    label.textAlignment = NSTextAlignmentCenter;
+    [block addSubview:label];
     return label;
 }
 
@@ -435,9 +450,20 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     for (MainTodoItem *m in [AITodoManager allTodos]) {
         if (m.isBookmarked) bookmarked++;
     }
-    self.allTodosValueLabel.text = [NSString stringWithFormat:@"%lu  ›", (unsigned long)total];
-    self.bookmarkValueLabel.text = [NSString stringWithFormat:@"%lu  ›", (unsigned long)bookmarked];
-    self.statsValueLabel.text = @"›";
+    self.allTodosValueLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)total];
+    self.bookmarkValueLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)bookmarked];
+    // 今日统计：今天未完成数
+    NSUInteger todayUndone = 0;
+    NSDate *todayStart = [cal startOfDayForDate:[NSDate date]];
+    NSDate *tomorrow = [cal dateByAddingUnit:NSCalendarUnitDay value:1 toDate:todayStart options:0];
+    for (MainTodoItem *m in [AITodoManager allTodos]) {
+        if (!m.done &&
+            [m.createTime compare:todayStart] != NSOrderedAscending &&
+            [m.createTime compare:tomorrow] == NSOrderedAscending) {
+            todayUndone++;
+        }
+    }
+    self.statsValueLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)todayUndone];
 
     BOOL empty = (self.listTodos.count == 0);
     self.tableView.hidden = empty;
@@ -718,6 +744,10 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     cell.onAddSubTask = ^{
         [self addSubTaskForTodo:todo];
     };
+    cell.onToggleDone = ^{
+        [AITodoManager markTodo:todo.identifier done:!todo.done];
+        [self reloadRowForTodo:todo];
+    };
     cell.onToggleSubTask = ^(SubTaskItem *sub) {
         [AITodoManager toggleSubTask:sub.identifier inTodo:todo.identifier];
         [self reloadRowForTodo:todo];
@@ -755,6 +785,15 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     MainTodoItem *todo = self.listTodos[indexPath.row];
+    UIContextualAction *doneAction = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleNormal
+                            title:todo.done ? @"取消完成" : @"完成"
+                          handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+        [AITodoManager markTodo:todo.identifier done:!todo.done];
+        [self reloadList];
+        completion(YES);
+    }];
+    doneAction.backgroundColor = [UIColor systemGreenColor];
     UIContextualAction *bookmark = [UIContextualAction
         contextualActionWithStyle:UIContextualActionStyleNormal
                             title:todo.isBookmarked ? @"取消书签" : @"书签"
@@ -764,7 +803,7 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
         completion(YES);
     }];
     bookmark.backgroundColor = [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0]; // 金色
-    return [UISwipeActionsConfiguration configurationWithActions:@[bookmark]];
+    return [UISwipeActionsConfiguration configurationWithActions:@[doneAction, bookmark]];
 }
 
 #pragma mark - 布局
@@ -799,17 +838,24 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
         self.didInitialScroll = YES;
         [self scrollToSelectedDayAnimated:NO]; // 首次布局后再定位到今天，保证可见
     }
-    // 全部待办 / 全部书签 / 今日统计：日历卡片下方，设置条目样式卡片
+    // 全部待办 / 全部书签 / 今日统计：一行三块
     CGFloat rowY = cardY + cardH + 10;
-    self.filterCard.frame = CGRectMake(cardX, rowY, cardW, 144);
-    self.allTodosRow.frame = CGRectMake(0, 0, cardW, 48);
-    self.allTodosValueLabel.frame = CGRectMake(cardW - 116, 0, 100, 48);
-    self.bookmarkRow.frame = CGRectMake(0, 48, cardW, 48);
-    self.bookmarkValueLabel.frame = CGRectMake(cardW - 116, 48, 100, 48);
-    self.statsRow.frame = CGRectMake(0, 96, cardW, 48);
-    self.statsValueLabel.frame = CGRectMake(cardW - 116, 96, 100, 48);
+    CGFloat filterH = 84;
+    self.filterCard.frame = CGRectMake(cardX, rowY, cardW, filterH);
+    CGFloat blockW = cardW / 3.0;
+    self.allTodosRow.frame = CGRectMake(0, 0, blockW, filterH);
+    self.bookmarkRow.frame = CGRectMake(blockW, 0, blockW, filterH);
+    self.statsRow.frame = CGRectMake(blockW * 2, 0, blockW, filterH);
+    for (UIButton *b in @[self.allTodosRow, self.bookmarkRow, self.statsRow]) {
+        [[b viewWithTag:1] setFrame:CGRectMake(0, 14, blockW, 18)];
+        [[b viewWithTag:2] setFrame:CGRectMake(0, 34, blockW, 28)];
+    }
+    if (self.filterDividers.count >= 2) {
+        [self.filterDividers[0] setFrame:CGRectMake(blockW, 18, 0.5, filterH - 36)];
+        [self.filterDividers[1] setFrame:CGRectMake(blockW * 2, 18, 0.5, filterH - 36)];
+    }
 
-    CGFloat headerY = rowY + 144 + 12;
+    CGFloat headerY = rowY + filterH + 12;
     self.listHeaderLabel.frame = CGRectMake(16, headerY, w - 32, 24);
     self.listHeaderLabel.textAlignment = NSTextAlignmentCenter;
     self.todayButton.frame = CGRectMake(w - 110, headerY, 90, 24);

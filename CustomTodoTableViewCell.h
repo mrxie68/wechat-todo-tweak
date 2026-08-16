@@ -6,6 +6,7 @@
 
 @property (nonatomic, copy) void (^onToggleSelect)(void);   // 点卡片：展开/收起（棕/浅色切换）
 @property (nonatomic, copy) void (^onAddSubTask)(void);     // 加子任务
+@property (nonatomic, copy) void (^onToggleDone)(void);     // 完成/取消完成
 @property (nonatomic, copy) void (^onToggleSubTask)(SubTaskItem *sub);
 @property (nonatomic, copy) void (^onEditSubTask)(SubTaskItem *sub);
 @property (nonatomic, copy) void (^onLongPress)(void);
@@ -17,6 +18,7 @@
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UIButton *plusButton;
+@property (nonatomic, strong) UIButton *doneButton;
 @property (nonatomic, strong) NSMutableArray *subRows;
 @property (nonatomic, strong) UIView *bookmarkStrip;
 @property (nonatomic, strong) UITapGestureRecognizer *cardTapGesture;
