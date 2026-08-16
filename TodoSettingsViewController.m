@@ -6,189 +6,239 @@
 
 extern NSString *todoTabDiagnostic(void); // 由 WeChatTodoTweak.m 提供
 
-@interface TodoSettingsViewController () <UITextFieldDelegate>
+@interface TodoSettingsViewController () <UITextFieldDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIView *contentView;
+
+@property (nonatomic, strong) UIView *introCard;
+@property (nonatomic, strong) UILabel *introLabel;
+@property (nonatomic, strong) UIView *actionCard;
+@property (nonatomic, strong) UIButton *openButton;
+@property (nonatomic, strong) UIButton *diagButton;
+@property (nonatomic, strong) UIView *memosCard;
+@property (nonatomic, strong) UILabel *urlLabel;
 @property (nonatomic, strong) UITextField *urlField;
+@property (nonatomic, strong) UILabel *tokenLabel;
 @property (nonatomic, strong) UITextField *tokenField;
+@property (nonatomic, strong) UILabel *visLabel;
 @property (nonatomic, strong) UISegmentedControl *visibilityControl;
-@property (nonatomic, assign) BOOL savedBarTranslucent;
-@property (nonatomic, strong) UIColor *savedBarTint;
-@property (nonatomic, assign) UIBarStyle savedBarStyle;
-@property (nonatomic, strong) UINavigationBarAppearance *savedStandardAppearance;
-@property (nonatomic, strong) UINavigationBarAppearance *savedScrollEdgeAppearance;
+@property (nonatomic, strong) UIButton *saveButton;
+@property (nonatomic, strong) UIView *opCard;
+@property (nonatomic, strong) UIButton *syncButton;
+@property (nonatomic, strong) UIButton *webButton;
+@property (nonatomic, strong) UIView *versionCard;
+@property (nonatomic, strong) UILabel *versionLabel;
+@property (nonatomic, strong) UILabel *versionValueLabel;
 @end
 
-static void todoAlert(NSString *msg); // 前向声明
+static void todoAlert(NSString *msg);
 
 @implementation TodoSettingsViewController
 
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    // 设置页在微信导航栏里打开时，强制当前导航栏不透明白，避免被主题插件透明化后露黑
-    UINavigationBar *bar = self.navigationController.navigationBar;
-    if (!bar) return;
-    self.savedBarTranslucent = bar.translucent;
-    self.savedBarTint = bar.barTintColor;
-    self.savedBarStyle = bar.barStyle;
-    if (@available(iOS 13.0, *)) {
-        self.savedStandardAppearance = bar.standardAppearance;
-        self.savedScrollEdgeAppearance = bar.scrollEdgeAppearance;
-        UINavigationBarAppearance *app = [[UINavigationBarAppearance alloc] init];
-        [app configureWithOpaqueBackground];
-        app.backgroundColor = [UIColor systemBackgroundColor];
-        app.shadowColor = [UIColor clearColor];
-        bar.standardAppearance = app;
-        bar.scrollEdgeAppearance = app;
-        bar.compactAppearance = app;
-    }
-    bar.translucent = NO;
-    bar.barTintColor = [UIColor systemBackgroundColor];
-}
-
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-    UINavigationBar *bar = self.navigationController.navigationBar;
-    if (!bar) return;
-    bar.translucent = self.savedBarTranslucent;
-    bar.barTintColor = self.savedBarTint;
-    bar.barStyle = self.savedBarStyle;
-    if (@available(iOS 13.0, *)) {
-        bar.standardAppearance = self.savedStandardAppearance;
-        bar.scrollEdgeAppearance = self.savedScrollEdgeAppearance;
-        bar.compactAppearance = nil;
-    }
-}
-
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"待办事项设置";
+    self.title = @"待办事项";
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-    // 内容从导航栏下方开始，避免和标题栏重叠
-    self.edgesForExtendedLayout = UIRectEdgeNone;
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.scrollView.alwaysBounceVertical = YES;
     self.scrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     [self.view addSubview:self.scrollView];
+
+    // 点击空白处收起键盘（点在输入框/按钮/控件上不触发）
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                         action:@selector(dismissKeyboard)];
+    tap.cancelsTouchesInView = NO;
+    tap.delegate = self;
+    [self.view addGestureRecognizer:tap];
+
     self.contentView = [[UIView alloc] initWithFrame:CGRectZero];
     [self.scrollView addSubview:self.contentView];
 
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"关闭"
-                                                                             style:UIBarButtonItemStylePlain
-                                                                            target:self
-                                                                            action:@selector(closeTapped)];
+    // 被 wcplugins 兜底弹出时才显示“关闭”；挂进微信设置页时用微信原生返回
+    if (self.navigationController.presentingViewController) {
+        self.navigationItem.leftBarButtonItem =
+            [[UIBarButtonItem alloc] initWithTitle:@"关闭"
+                                             style:UIBarButtonItemStylePlain
+                                            target:self
+                                            action:@selector(closeTapped)];
+    }
 
-    CGFloat w = self.view.bounds.size.width;
-    CGFloat x = 16;
-    CGFloat cardW = w - 32;
-    CGFloat y = 12;
+    [self buildUI];
+}
 
-    // 使用说明
-    UILabel *intro = [[UILabel alloc] initWithFrame:CGRectMake(x, y, cardW, 60)];
-    intro.text = @"微信底部菜单新增「待办」tab，点它直接进待办页。\n像普通待办 App 一样：添加、勾选、删除、同步。";
-    intro.numberOfLines = 0;
-    intro.font = [UIFont systemFontOfSize:13];
-    intro.textColor = [UIColor secondaryLabelColor];
-    [self.contentView addSubview:intro];
-    y += 60 + 12;
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    // 不做任何导航栏样式篡改：被微信 push 时保持微信原生外观，避免转场闪黑/主题被破坏
+    [self.navigationController setNavigationBarHidden:NO animated:animated];
+}
 
-    // 打开待办页
-    UIButton *openBtn = [self makeButton:@"📋 打开待办页"];
-    openBtn.frame = CGRectMake(x, y, cardW, 44);
-    [openBtn addTarget:self action:@selector(openTodoTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:openBtn];
-    y += 44 + 12;
+- (void)dismissKeyboard {
+    [self.view endEditing:YES];
+}
 
-    // 手势诊断
-    UIButton *diagBtn = [self makeButton:@"🔍 诊断（底部菜单，复制到剪贴板）"];
-    diagBtn.frame = CGRectMake(x, y, cardW, 44);
-    [diagBtn addTarget:self action:@selector(diagTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:diagBtn];
-    y += 44 + 12;
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
+    if ([touch.view isKindOfClass:[UITextField class]] ||
+        [touch.view isKindOfClass:[UIButton class]] ||
+        [touch.view isKindOfClass:[UISegmentedControl class]]) {
+        return NO;
+    }
+    return YES;
+}
 
-    // Memos 配置
-    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(x, y, cardW, 170)];
-    card.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    card.layer.cornerRadius = 12;
-    [self.contentView addSubview:card];
+#pragma mark - UI 构建
 
-    UILabel *urlLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, 90, 30)];
-    urlLabel.text = @"Memos 地址";
-    urlLabel.font = [UIFont systemFontOfSize:15];
-    [card addSubview:urlLabel];
-    self.urlField = [[UITextField alloc] initWithFrame:CGRectMake(110, 12, cardW - 130, 30)];
-    self.urlField.placeholder = @"http://[IPv6地址]:5230";
-    self.urlField.font = [UIFont systemFontOfSize:14];
-    self.urlField.borderStyle = UITextBorderStyleRoundedRect;
+- (void)buildUI {
+    self.introCard = [self makeCard];
+    self.introLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.introLabel.text = @"微信设置页新增「待办事项」入口：\n记录待办、勾选完成、收藏书签，可与 Memos 同步。";
+    self.introLabel.numberOfLines = 0;
+    self.introLabel.font = [UIFont systemFontOfSize:13];
+    self.introLabel.textColor = [UIColor secondaryLabelColor];
+    [self.introCard addSubview:self.introLabel];
+    [self.contentView addSubview:self.introCard];
+
+    self.actionCard = [self makeCard];
+    self.openButton = [self makeRowButton:@"📋 打开待办页"];
+    [self.openButton addTarget:self action:@selector(openTodoTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.actionCard addSubview:self.openButton];
+    self.diagButton = [self makeRowButton:@"🔍 诊断（底部菜单，复制到剪贴板）"];
+    [self.diagButton addTarget:self action:@selector(diagTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.actionCard addSubview:self.diagButton];
+    [self.contentView addSubview:self.actionCard];
+
+    self.memosCard = [self makeCard];
+    self.urlLabel = [self makeRowLabel:@"Memos 地址"];
+    [self.memosCard addSubview:self.urlLabel];
+    self.urlField = [self makeRowField:@"http://[IPv6地址]:5230"];
     self.urlField.text = [AISettings memosURL];
-    self.urlField.autocorrectionType = UITextAutocorrectionTypeNo;
-    self.urlField.delegate = self;
-    [card addSubview:self.urlField];
-
-    UILabel *tokenLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 52, 90, 30)];
-    tokenLabel.text = @"Token";
-    tokenLabel.font = [UIFont systemFontOfSize:15];
-    [card addSubview:tokenLabel];
-    self.tokenField = [[UITextField alloc] initWithFrame:CGRectMake(110, 52, cardW - 130, 30)];
-    self.tokenField.placeholder = @"Access Token";
-    self.tokenField.font = [UIFont systemFontOfSize:14];
-    self.tokenField.borderStyle = UITextBorderStyleRoundedRect;
+    [self.memosCard addSubview:self.urlField];
+    self.tokenLabel = [self makeRowLabel:@"Token"];
+    [self.memosCard addSubview:self.tokenLabel];
+    self.tokenField = [self makeRowField:@"Access Token"];
     self.tokenField.text = [AISettings memosToken];
     self.tokenField.secureTextEntry = YES;
-    self.tokenField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [card addSubview:self.tokenField];
-
-    UILabel *visLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 92, 90, 30)];
-    visLabel.text = @"可见性";
-    visLabel.font = [UIFont systemFontOfSize:15];
-    [card addSubview:visLabel];
+    [self.memosCard addSubview:self.tokenField];
+    self.visLabel = [self makeRowLabel:@"可见性"];
+    [self.memosCard addSubview:self.visLabel];
     self.visibilityControl = [[UISegmentedControl alloc] initWithItems:@[@"PRIVATE", @"PUBLIC", @"PROTECTED"]];
-    self.visibilityControl.frame = CGRectMake(110, 92, cardW - 130, 30);
     NSString *vis = [AISettings memosVisibility];
     self.visibilityControl.selectedSegmentIndex =
         [vis isEqualToString:@"PUBLIC"] ? 1 : ([vis isEqualToString:@"PROTECTED"] ? 2 : 0);
-    [card addSubview:self.visibilityControl];
+    [self.memosCard addSubview:self.visibilityControl];
+    self.saveButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.saveButton setTitle:@"保存配置" forState:UIControlStateNormal];
+    self.saveButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    [self.saveButton addTarget:self action:@selector(saveTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.memosCard addSubview:self.saveButton];
+    [self.contentView addSubview:self.memosCard];
 
-    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem];
-    save.frame = CGRectMake(16, 130, cardW - 32, 32);
-    [save setTitle:@"保存配置" forState:UIControlStateNormal];
-    [save addTarget:self action:@selector(saveTapped) forControlEvents:UIControlEventTouchUpInside];
-    [card addSubview:save];
-    y += 170 + 12;
+    self.opCard = [self makeCard];
+    self.syncButton = [self makeRowButton:@"☁️ 同步未完成待办到 Memos"];
+    [self.syncButton addTarget:self action:@selector(syncTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.opCard addSubview:self.syncButton];
+    self.webButton = [self makeRowButton:@"🌐 打开 Memos 网页"];
+    [self.webButton addTarget:self action:@selector(openTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.opCard addSubview:self.webButton];
+    [self.contentView addSubview:self.opCard];
 
-    // 操作按钮
-    UIButton *syncBtn = [self makeButton:@"☁️ 同步未完成待办到 Memos"];
-    syncBtn.frame = CGRectMake(x, y, cardW, 44);
-    [syncBtn addTarget:self action:@selector(syncTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:syncBtn];
-    y += 44 + 8;
+    self.versionCard = [self makeCard];
+    self.versionLabel = [self makeRowLabel:@"插件版本"];
+    [self.versionCard addSubview:self.versionLabel];
+    self.versionValueLabel = [self makeRowLabel:kAITodoVersion];
+    self.versionValueLabel.textColor = [UIColor secondaryLabelColor];
+    self.versionValueLabel.textAlignment = NSTextAlignmentRight;
+    [self.versionCard addSubview:self.versionValueLabel];
+    [self.contentView addSubview:self.versionCard];
 
-    UIButton *webBtn = [self makeButton:@"🌐 打开 Memos 网页"];
-    webBtn.frame = CGRectMake(x, y, cardW, 44);
-    [webBtn addTarget:self action:@selector(openTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:webBtn];
-    y += 44 + 12;
-
-    UILabel *versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, y, w, 24)];
-    versionLabel.text = [NSString stringWithFormat:@"待办插件 v%@", kAITodoVersion];
-    versionLabel.textAlignment = NSTextAlignmentCenter;
-    versionLabel.font = [UIFont systemFontOfSize:12];
-    versionLabel.textColor = [UIColor secondaryLabelColor];
-    [self.contentView addSubview:versionLabel];
-    y += 24 + 12;
-
-    self.contentView.frame = CGRectMake(0, 0, w, y);
-    self.scrollView.contentSize = CGSizeMake(w, y);
+    [self layoutCards];
 }
 
-- (UIButton *)makeButton:(NSString *)title {
+- (UIView *)makeCard {
+    UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
+    card.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    card.layer.cornerRadius = 12;
+    card.layer.masksToBounds = YES;
+    return card;
+}
+
+- (UILabel *)makeRowLabel:(NSString *)text {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.text = text;
+    label.font = [UIFont systemFontOfSize:16];
+    label.textColor = [UIColor labelColor];
+    return label;
+}
+
+- (UITextField *)makeRowField:(NSString *)placeholder {
+    UITextField *field = [[UITextField alloc] initWithFrame:CGRectZero];
+    field.placeholder = placeholder;
+    field.borderStyle = UITextBorderStyleNone;
+    field.font = [UIFont systemFontOfSize:15];
+    field.textAlignment = NSTextAlignmentRight;
+    field.autocorrectionType = UITextAutocorrectionTypeNo;
+    field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.delegate = self;
+    return field;
+}
+
+- (UIButton *)makeRowButton:(NSString *)title {
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
     [btn setTitle:title forState:UIControlStateNormal];
-    btn.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    btn.layer.cornerRadius = 12;
+    btn.titleLabel.font = [UIFont systemFontOfSize:16];
+    btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    btn.titleEdgeInsets = UIEdgeInsetsMake(0, 16, 0, 0);
     return btn;
 }
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    self.scrollView.frame = self.view.bounds;
+    [self layoutCards];
+}
+
+- (void)layoutCards {
+    CGFloat width = self.view.bounds.size.width;
+    CGFloat x = 16;
+    CGFloat cardW = width - 32;
+    CGFloat y = 12;
+
+    self.introCard.frame = CGRectMake(x, y, cardW, 64);
+    self.introLabel.frame = CGRectMake(16, 10, cardW - 32, 44);
+    y += 64 + 12;
+
+    self.actionCard.frame = CGRectMake(x, y, cardW, 96);
+    self.openButton.frame = CGRectMake(0, 0, cardW, 48);
+    self.diagButton.frame = CGRectMake(0, 48, cardW, 48);
+    y += 96 + 12;
+
+    self.memosCard.frame = CGRectMake(x, y, cardW, 192);
+    self.urlLabel.frame = CGRectMake(16, 0, 110, 48);
+    self.urlField.frame = CGRectMake(130, 0, cardW - 146, 48);
+    self.tokenLabel.frame = CGRectMake(16, 48, 110, 48);
+    self.tokenField.frame = CGRectMake(130, 48, cardW - 146, 48);
+    self.visLabel.frame = CGRectMake(16, 96, 110, 48);
+    self.visibilityControl.frame = CGRectMake(130, 104, cardW - 146, 32);
+    self.saveButton.frame = CGRectMake(16, 140, cardW - 32, 44);
+    y += 192 + 12;
+
+    self.opCard.frame = CGRectMake(x, y, cardW, 96);
+    self.syncButton.frame = CGRectMake(0, 0, cardW, 48);
+    self.webButton.frame = CGRectMake(0, 48, cardW, 48);
+    y += 96 + 12;
+
+    self.versionCard.frame = CGRectMake(x, y, cardW, 48);
+    self.versionLabel.frame = CGRectMake(16, 0, cardW - 160, 48);
+    self.versionValueLabel.frame = CGRectMake(cardW - 140, 0, 124, 48);
+    y += 48 + 20;
+
+    self.contentView.frame = CGRectMake(0, 0, width, y);
+    self.scrollView.contentSize = CGSizeMake(width, y);
+}
+
+#pragma mark - 操作
 
 - (void)openTodoTapped {
     [self.view endEditing:YES];
@@ -220,7 +270,6 @@ static void todoAlert(NSString *msg); // 前向声明
     [self presentViewController:progress animated:YES completion:nil];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block NSString *diag = nil;
-        // 诊断会读 UI 层级，必须在主线程执行
         dispatch_sync(dispatch_get_main_queue(), ^{
             diag = todoTabDiagnostic();
         });
@@ -290,6 +339,19 @@ static void todoAlert(NSString *msg); // 前向声明
     }
 }
 
+- (void)closeTapped {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+#pragma mark - UITextFieldDelegate
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [textField resignFirstResponder];
+    return YES;
+}
+
+@end
+
 static void todoAlert(NSString *msg) {
     UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
     while (top.presentedViewController) top = top.presentedViewController;
@@ -299,15 +361,3 @@ static void todoAlert(NSString *msg) {
     [a addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
     [top presentViewController:a animated:YES completion:nil];
 }
-
-- (void)closeTapped {
-    if (self.navigationController.presentingViewController) {
-        [self dismissViewControllerAnimated:YES completion:nil];
-    } else if (self.navigationController) {
-        [self.navigationController popViewControllerAnimated:YES];
-    } else {
-        [self dismissViewControllerAnimated:YES completion:nil];
-    }
-}
-
-@end

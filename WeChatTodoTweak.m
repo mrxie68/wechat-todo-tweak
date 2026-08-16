@@ -820,6 +820,8 @@ NSString *todoTabDiagnostic(void) {
     UIView *container = findBottomTabContainer(win);
     [s appendFormat:@"tab 容器: %@\n", container ? NSStringFromClass([container class]) : @"未找到"];
     [s appendFormat:@"待办tab已加: %@\n", g_todoTabItemView ? @"是" : @"否"];
+    [s appendFormat:@"设置页入口: %@\n",
+     g_todoSettingHooked ? @"微信原生设置页" : (g_todoSettingsFallbackUsed ? @"wcplugins 兜底" : @"安装中…")];
     @synchronized (g_diagLock) {
         [s appendString:@"\n事件日志（最近40条）:\n"];
         for (NSString *e in g_diagEvents) {
@@ -946,8 +948,324 @@ static void installHooks(void) {
     NSLog(kAITodoLogPrefix "消息 hook 已安装（仅账号刷新）");
 }
 
-#pragma mark - wcplugins 注册
+#pragma mark - 设置页入口：优先挂入微信原生设置页（参考 itenfay/WeChat_tweak）
 
+static void *kTodoSettingTableKey = &kTodoSettingTableKey;          // 标记微信设置页表格
+static void *kTodoDSHookedKey = &kTodoDSHookedKey;                  // 某 dataSource 类已挂钩
+static void *kTodoOrigNumberRowsKey = &kTodoOrigNumberRowsKey;      // 每类原实现（沿继承链取）
+static void *kTodoOrigCellKey = &kTodoOrigCellKey;
+static void *kTodoOrigDidSelectKey = &kTodoOrigDidSelectKey;
+static void *kTodoOrigHeightKey = &kTodoOrigHeightKey;
+
+static void (*orig_reloadTableData_setting)(id, SEL);
+static void (*orig_viewDidAppear_setting)(id, SEL, BOOL);
+static BOOL g_todoSettingHooked = NO;
+static BOOL g_todoSettingsFallbackUsed = NO;
+
+static NSInteger swz_todo_numberOfRows(id, SEL, UITableView *, NSInteger);        // 前向声明
+static UITableViewCell *swz_todo_cellForRow(id, SEL, UITableView *, NSIndexPath *);
+static void swz_todo_didSelect(id, SEL, UITableView *, NSIndexPath *);
+static CGFloat swz_todo_heightForRow(id, SEL, UITableView *, NSIndexPath *);
+static BOOL todoEnsureDataSourceHooked(UITableView *);                           // 前向声明
+static void registerWithWCPlugins(int remaining);                                // 前向声明（兜底）
+
+static BOOL todoTableIsSettingTable(UITableView *tableView) {
+    return [objc_getAssociatedObject(tableView, &kTodoSettingTableKey) boolValue];
+}
+
+// 沿类继承链查找该类的“挂钩前原实现”（子类实例也能取到父类记录的原实现）
+static IMP todoOrigImpForClass(Class cls, void *key) {
+    for (Class c = cls; c; c = class_getSuperclass(c)) {
+        NSValue *v = objc_getAssociatedObject(c, key);
+        if (v) return (IMP)[v pointerValue];
+    }
+    return NULL;
+}
+
+static void todoSetOrigImpForClass(Class cls, void *key, IMP imp) {
+    objc_setAssociatedObject(cls, key,
+                             [NSValue valueWithPointer:(const void *)imp],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// 找到指定视图内的第一个 UITableView
+static UITableView *todoFindTableViewInView(UIView *view) {
+    if (!view) return nil;
+    if ([view isKindOfClass:[UITableView class]]) return (UITableView *)view;
+    for (UIView *sub in view.subviews) {
+        UITableView *found = todoFindTableViewInView(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
+static UITableViewCell *todoMakeSettingEntryCell(void) {
+    UITableViewCell *cell = nil;
+    @try {
+        Class cellClass = NSClassFromString(@"MMTableViewCell");
+        if (cellClass) {
+            cell = [[cellClass alloc] initWithStyle:UITableViewCellStyleDefault
+                                    reuseIdentifier:@"WeChatTodoSettingEntry"];
+        }
+    } @catch (NSException *e) {
+        cell = nil;
+    }
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                      reuseIdentifier:@"WeChatTodoSettingEntry"];
+    }
+    cell.textLabel.text = @"待办事项";
+    cell.textLabel.font = [UIFont systemFontOfSize:17];
+    cell.textLabel.textColor = [UIColor labelColor];
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    // 背景不写死，交给 MMTableViewCell / 微信主题接管，ThemeBox 也能正常染色
+    return cell;
+}
+
+// 打开设置页：优先 push 进微信导航栈（原生转场，无黑背景）
+static void todoPushSettingsPage(UITableView *tableView) {
+    @try {
+        Class vcCls = NSClassFromString(@"TodoSettingsViewController");
+        if (!vcCls) return;
+        UIViewController *vc = [[vcCls alloc] init];
+        UIViewController *host = nil;
+        UIResponder *r = tableView;
+        while ((r = [r nextResponder])) {
+            if ([r isKindOfClass:[UIViewController class]]) {
+                host = (UIViewController *)r;
+                break;
+            }
+        }
+        UINavigationController *nav = host.navigationController;
+        if (nav) {
+            [nav pushViewController:vc animated:YES];
+            return;
+        }
+        UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+        while (top.presentedViewController) top = top.presentedViewController;
+        UINavigationController *wrap = [[UINavigationController alloc] initWithRootViewController:vc];
+        wrap.modalPresentationStyle = UIModalPresentationFullScreen;
+        [top presentViewController:wrap animated:YES completion:nil];
+    } @catch (NSException *e) {
+        NSLog(kAITodoLogPrefix "打开待办设置页异常: %@", e);
+    }
+}
+
+static NSInteger swz_todo_numberOfRows(id self, SEL _cmd, UITableView *tableView, NSInteger section) {
+    NSInteger (*origFn)(id, SEL, UITableView *, NSInteger) =
+        (NSInteger (*)(id, SEL, UITableView *, NSInteger))
+        todoOrigImpForClass(object_getClass(self), &kTodoOrigNumberRowsKey);
+    NSInteger orig = origFn ? origFn(self, _cmd, tableView, section) : 0;
+    if (todoTableIsSettingTable(tableView) && section == 0) {
+        return orig + 1; // 第一组顶部加一行“待办事项”
+    }
+    return orig;
+}
+
+// 把设置页表格 dataSource 的类挂上我们的扩展。
+// 动态发现：不预设 MMTableViewInfo / WCTableViewManager，实际是谁就 hook 谁。
+// 原实现沿继承链存放，子类实例也能取到。返回 YES 表示“刚刚补挂”，需要刷一次表格。
+static BOOL todoEnsureDataSourceHooked(UITableView *tableView) {
+    if (!tableView.dataSource) return NO;
+    Class ds = object_getClass(tableView.dataSource);
+    if (!ds) return NO;
+    if (objc_getAssociatedObject(ds, &kTodoDSHookedKey)) return NO;
+
+    SEL sels[4] = {
+        @selector(tableView:numberOfRowsInSection:),
+        @selector(tableView:cellForRowAtIndexPath:),
+        @selector(tableView:didSelectRowAtIndexPath:),
+        @selector(tableView:heightForRowAtIndexPath:)
+    };
+    void *keys[4] = {
+        &kTodoOrigNumberRowsKey, &kTodoOrigCellKey,
+        &kTodoOrigDidSelectKey, &kTodoOrigHeightKey
+    };
+    IMP imps[4] = {
+        (IMP)swz_todo_numberOfRows, (IMP)swz_todo_cellForRow,
+        (IMP)swz_todo_didSelect, (IMP)swz_todo_heightForRow
+    };
+
+    BOOL installed = NO;
+    for (int i = 0; i < 4; i++) {
+        Method m = class_getInstanceMethod(ds, sels[i]);
+        if (!m) continue;
+        IMP imp = method_getImplementation(m);
+        if (imp == imps[i]) continue; // 已是我们（含继承），无需重复挂钩
+        // 找方法实际定义在继承链的哪个类上，原实现记在那个类，整条链都能取到
+        Class owner = ds;
+        for (Class c = ds; c; c = class_getSuperclass(c)) {
+            unsigned int count = 0;
+            Method *ms = class_copyMethodList(c, &count);
+            BOOL defines = NO;
+            for (unsigned int j = 0; j < count; j++) {
+                if (method_getName(ms[j]) == sels[i]) { defines = YES; break; }
+            }
+            free(ms);
+            if (defines) { owner = c; break; }
+        }
+        if (!todoOrigImpForClass(owner, keys[i])) {
+            todoSetOrigImpForClass(owner, keys[i], imp);
+        }
+        method_setImplementation(m, imps[i]);
+        installed = YES;
+    }
+    objc_setAssociatedObject(ds, &kTodoDSHookedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return installed;
+}
+
+static UITableViewCell *swz_todo_cellForRow(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    if (todoEnsureDataSourceHooked(tableView)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [tableView reloadData];
+        });
+    }
+    if (todoTableIsSettingTable(tableView) && indexPath.section == 0) {
+        if (indexPath.row == 0) return todoMakeSettingEntryCell();
+        NSIndexPath *shifted = [NSIndexPath indexPathForRow:indexPath.row - 1 inSection:indexPath.section];
+        UITableViewCell *(*origFn)(id, SEL, UITableView *, NSIndexPath *) =
+            (UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))
+            todoOrigImpForClass(object_getClass(self), &kTodoOrigCellKey);
+        return origFn ? origFn(self, _cmd, tableView, shifted) : nil;
+    }
+    UITableViewCell *(*origFn)(id, SEL, UITableView *, NSIndexPath *) =
+        (UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))
+        todoOrigImpForClass(object_getClass(self), &kTodoOrigCellKey);
+    return origFn ? origFn(self, _cmd, tableView, indexPath) : nil;
+}
+
+static void swz_todo_didSelect(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    todoEnsureDataSourceHooked(tableView);
+    if (todoTableIsSettingTable(tableView) && indexPath.section == 0) {
+        if (indexPath.row == 0) {
+            [tableView deselectRowAtIndexPath:indexPath animated:YES];
+            todoPushSettingsPage(tableView);
+            return;
+        }
+        NSIndexPath *shifted = [NSIndexPath indexPathForRow:indexPath.row - 1 inSection:indexPath.section];
+        void (*origFn)(id, SEL, UITableView *, NSIndexPath *) =
+            (void (*)(id, SEL, UITableView *, NSIndexPath *))
+            todoOrigImpForClass(object_getClass(self), &kTodoOrigDidSelectKey);
+        if (origFn) origFn(self, _cmd, tableView, shifted);
+        return;
+    }
+    void (*origFn)(id, SEL, UITableView *, NSIndexPath *) =
+        (void (*)(id, SEL, UITableView *, NSIndexPath *))
+        todoOrigImpForClass(object_getClass(self), &kTodoOrigDidSelectKey);
+    if (origFn) origFn(self, _cmd, tableView, indexPath);
+}
+
+static CGFloat swz_todo_heightForRow(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    todoEnsureDataSourceHooked(tableView);
+    if (todoTableIsSettingTable(tableView) && indexPath.section == 0) {
+        if (indexPath.row == 0) return 44;
+        NSIndexPath *shifted = [NSIndexPath indexPathForRow:indexPath.row - 1 inSection:indexPath.section];
+        CGFloat (*origFn)(id, SEL, UITableView *, NSIndexPath *) =
+            (CGFloat (*)(id, SEL, UITableView *, NSIndexPath *))
+            todoOrigImpForClass(object_getClass(self), &kTodoOrigHeightKey);
+        return origFn ? origFn(self, _cmd, tableView, shifted) : 44;
+    }
+    CGFloat (*origFn)(id, SEL, UITableView *, NSIndexPath *) =
+        (CGFloat (*)(id, SEL, UITableView *, NSIndexPath *))
+        todoOrigImpForClass(object_getClass(self), &kTodoOrigHeightKey);
+    return origFn ? origFn(self, _cmd, tableView, indexPath) : 44;
+}
+
+// 设置页 reloadTableData / viewDidAppear 时给表格打标记，并动态挂钩它的 dataSource
+static void todoMarkSettingTable(UIViewController *vc) {
+    @try {
+        UITableView *tableView = nil;
+        Ivar tableIvar = class_getInstanceVariable([vc class], "m_tableView");
+        if (tableIvar) tableView = object_getIvar(vc, tableIvar);
+        if (!tableView) tableView = todoFindTableViewInView(vc.view);
+        if (tableView) {
+            objc_setAssociatedObject(tableView, &kTodoSettingTableKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            if (todoEnsureDataSourceHooked(tableView)) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [tableView reloadData];
+                });
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(kAITodoLogPrefix "标记设置页表格异常: %@", e);
+    }
+}
+
+static void swz_reloadTableData_setting(id self, SEL _cmd) {
+    if (orig_reloadTableData_setting) orig_reloadTableData_setting(self, _cmd);
+    if ([self isKindOfClass:[UIViewController class]]) {
+        todoMarkSettingTable((UIViewController *)self);
+    }
+}
+
+static void swz_viewDidAppear_setting(id self, SEL _cmd, BOOL animated) {
+    if (orig_viewDidAppear_setting) orig_viewDidAppear_setting(self, _cmd, animated);
+    if ([self isKindOfClass:[UIViewController class]]) {
+        todoMarkSettingTable((UIViewController *)self);
+    }
+}
+
+// 只 hook“类自己实现”的方法，避免误改父类实现影响微信其他页面
+static BOOL todoClassDefines(Class cls, SEL sel) {
+    if (!cls || !sel) return NO;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    BOOL found = NO;
+    for (unsigned int i = 0; i < count; i++) {
+        if (method_getName(methods[i]) == sel) {
+            found = YES;
+            break;
+        }
+    }
+    free(methods);
+    return found;
+}
+
+static void installTodoSettingHooks(void) {
+    if (g_todoSettingHooked) return;
+    Class settingCls = NSClassFromString(@"NewSettingViewController");
+    if (!settingCls) return;
+
+    Method method;
+    BOOL markingInstalled = NO;
+    if (todoClassDefines(settingCls, @selector(reloadTableData))) {
+        method = class_getInstanceMethod(settingCls, @selector(reloadTableData));
+        orig_reloadTableData_setting = (void *)method_getImplementation(method);
+        method_setImplementation(method, (IMP)swz_reloadTableData_setting);
+        markingInstalled = YES;
+    }
+    if (todoClassDefines(settingCls, @selector(viewDidAppear:))) {
+        method = class_getInstanceMethod(settingCls, @selector(viewDidAppear:));
+        orig_viewDidAppear_setting = (void *)method_getImplementation(method);
+        method_setImplementation(method, (IMP)swz_viewDidAppear_setting);
+        markingInstalled = YES;
+    }
+    // 只有装上了“能标记设置页表格”的钩子才算成功；否则继续重试，最终退回 wcplugins
+    g_todoSettingHooked = markingInstalled;
+    if (g_todoSettingHooked) {
+        NSLog(kAITodoLogPrefix "已挂入微信原生设置页入口（NewSettingViewController）");
+    } else {
+        NSLog(kAITodoLogPrefix "设置页标记钩子未装上（NewSettingViewController 无 reloadTableData/viewDidAppear），等待兜底");
+    }
+}
+
+// 优先原生设置页入口；长时间拿不到再退回 wcplugins（避免重复条目，二选一）
+static void setupTodoSettingsEntry(int remaining) {
+    if (g_todoSettingsFallbackUsed) return;
+    installTodoSettingHooks();
+    if (g_todoSettingHooked) return;
+    if (remaining <= 0) {
+        g_todoSettingsFallbackUsed = YES;
+        registerWithWCPlugins(0);
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        setupTodoSettingsEntry(remaining - 1);
+    });
+}
+
+// wcplugins 兜底：原生设置页入口不可用时的备用注册
 static void registerWithWCPlugins(int remaining) {
     static BOOL g_wcpluginsRegistered = NO;
     if (g_wcpluginsRegistered) return; // 幂等：只注册一次
@@ -959,7 +1277,7 @@ static void registerWithWCPlugins(int remaining) {
                                      version:kAITodoVersion
                                   controller:@"TodoSettingsViewController"];
             g_wcpluginsRegistered = YES;
-            NSLog(kAITodoLogPrefix "已注册到 wcplugins（设置页条目）");
+            NSLog(kAITodoLogPrefix "已注册到 wcplugins（设置页条目，兜底）");
             return;
         }
     }
@@ -999,7 +1317,7 @@ static void WeChatTodoInit(void) {
                                                       object:nil
                                                        queue:nil
                                                   usingBlock:^(NSNotification *note) {
-        registerWithWCPlugins(10);
+        setupTodoSettingsEntry(15);
         installHooks();
         // 底部菜单加“待办”tab：微信结构加载较慢，分几次尝试
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
@@ -1022,7 +1340,7 @@ static void WeChatTodoInit(void) {
     // 兜底：通知没等到也安装
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        registerWithWCPlugins(10);
+        setupTodoSettingsEntry(15);
         installHooks();
         installTodoTabItem();
     });
