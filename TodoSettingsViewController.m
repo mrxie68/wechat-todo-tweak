@@ -92,7 +92,7 @@ static void todoAlert(NSString *msg);
 - (void)buildUI {
     self.introCard = [self makeCard];
     self.introLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.introLabel.text = @"微信设置页新增「待办事项」入口：\n记录待办、勾选完成、收藏书签，可与 Memos 同步。";
+    self.introLabel.text = @"微信底部菜单新增「待办」tab：\n记录待办、勾选完成、收藏书签，可与 Memos 同步。";
     self.introLabel.numberOfLines = 0;
     self.introLabel.font = [UIFont systemFontOfSize:13];
     self.introLabel.textColor = [UIColor secondaryLabelColor];
