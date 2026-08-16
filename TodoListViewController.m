@@ -6,7 +6,9 @@
 
 @interface TodoListViewController () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, assign) BOOL bookmarkMode;
+@property (nonatomic, assign) NSInteger filterIndex; // 0 全部待办 / 1 已完成 / 2 未完成
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UISegmentedControl *segmentControl;
 @property (nonatomic, strong) NSArray<MainTodoItem *> *items;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, strong) NSMutableSet *expandedIds; // 展开状态只存内存
@@ -41,6 +43,16 @@
                                                       action:@selector(addTapped)];
     self.expandedIds = [NSMutableSet set];
 
+    // 全部页：顶部三段切换（全部待办 / 已完成 / 未完成）
+    if (!self.bookmarkMode) {
+        self.segmentControl = [[UISegmentedControl alloc] initWithItems:@[@"全部待办", @"已完成", @"未完成"]];
+        self.segmentControl.selectedSegmentIndex = self.filterIndex;
+        [self.segmentControl addTarget:self
+                                action:@selector(segmentChanged)
+                      forControlEvents:UIControlEventValueChanged];
+        [self.view addSubview:self.segmentControl];
+    }
+
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.tableView.backgroundColor = [UIColor clearColor];
@@ -54,7 +66,15 @@
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.textColor = [UIColor secondaryLabelColor];
     self.emptyLabel.font = [UIFont systemFontOfSize:14];
-    self.emptyLabel.text = self.bookmarkMode ? @"还没有书签\n在待办列表右滑卡片即可收藏" : @"还没有待办";
+    if (self.bookmarkMode) {
+        self.emptyLabel.text = @"还没有书签\n在待办列表右滑卡片即可收藏";
+    } else if (self.filterIndex == 1) {
+        self.emptyLabel.text = @"还没有已完成的待办";
+    } else if (self.filterIndex == 2) {
+        self.emptyLabel.text = @"没有未完成的待办 🎉";
+    } else {
+        self.emptyLabel.text = @"还没有待办";
+    }
     self.emptyLabel.hidden = YES;
     [self.view addSubview:self.emptyLabel];
 
@@ -63,9 +83,26 @@
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    self.tableView.frame = self.view.bounds;
-    self.emptyLabel.frame = CGRectMake(32, self.view.bounds.size.height / 2.0 - 60,
-                                       self.view.bounds.size.width - 64, 80);
+    CGRect b = self.view.bounds;
+    UIEdgeInsets sa = self.view.safeAreaInsets;
+    if (self.segmentControl) {
+        CGFloat segY = sa.top + 8;
+        self.segmentControl.frame = CGRectMake(16, segY, b.size.width - 32, 32);
+        CGFloat tableY = segY + 32 + 8;
+        self.tableView.frame = CGRectMake(0, tableY, b.size.width,
+                                          b.size.height - tableY - sa.bottom);
+        self.emptyLabel.frame = CGRectMake(32, tableY + (b.size.height - tableY - sa.bottom) / 2.0 - 60,
+                                           b.size.width - 64, 80);
+    } else {
+        self.tableView.frame = b;
+        self.emptyLabel.frame = CGRectMake(32, b.size.height / 2.0 - 60,
+                                           b.size.width - 64, 80);
+    }
+}
+
+- (void)segmentChanged {
+    self.filterIndex = self.segmentControl.selectedSegmentIndex;
+    [self reloadData];
 }
 
 - (void)reloadData {
@@ -76,6 +113,18 @@
             if (m.isBookmarked) [bm addObject:m];
         }
         arr = bm;
+    } else if (self.filterIndex == 1) {
+        NSMutableArray *done = [NSMutableArray array];
+        for (MainTodoItem *m in arr) {
+            if (m.done) [done addObject:m];
+        }
+        arr = done;
+    } else if (self.filterIndex == 2) {
+        NSMutableArray *undone = [NSMutableArray array];
+        for (MainTodoItem *m in arr) {
+            if (!m.done) [undone addObject:m];
+        }
+        arr = undone;
     }
     [arr sortUsingComparator:^NSComparisonResult(MainTodoItem *a, MainTodoItem *b) {
         return [b.createTime compare:a.createTime]; // 新的在前
@@ -83,6 +132,15 @@
     self.items = arr;
     self.tableView.hidden = (arr.count == 0);
     self.emptyLabel.hidden = (arr.count > 0);
+    if (self.bookmarkMode) {
+        self.emptyLabel.text = @"还没有书签\n在待办列表右滑卡片即可收藏";
+    } else if (self.filterIndex == 1) {
+        self.emptyLabel.text = @"还没有已完成的待办";
+    } else if (self.filterIndex == 2) {
+        self.emptyLabel.text = @"没有未完成的待办 🎉";
+    } else {
+        self.emptyLabel.text = @"还没有待办";
+    }
     [self.tableView reloadData];
 }
 

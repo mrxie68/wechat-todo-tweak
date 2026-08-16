@@ -246,9 +246,9 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     self.filterCard.layer.masksToBounds = YES;
     [self.view addSubview:self.filterCard];
 
-    self.allTodosRow = [self makeFilterBlock:@"全部待办" action:@selector(openAllTodos)];
-    self.bookmarkRow = [self makeFilterBlock:@"全部书签" action:@selector(openBookmarks)];
-    self.statsRow = [self makeFilterBlock:@"今日统计" action:@selector(openStats)];
+    self.allTodosRow = [self makeFilterBlock:@"全部" action:@selector(openAllTodos)];
+    self.bookmarkRow = [self makeFilterBlock:@"书签" action:@selector(openBookmarks)];
+    self.statsRow = [self makeFilterBlock:@"统计" action:@selector(openStats)];
 
     self.allTodosValueLabel = [self makeFilterBlockValueFor:self.allTodosRow];
     self.bookmarkValueLabel = [self makeFilterBlockValueFor:self.bookmarkRow];
