@@ -3,6 +3,8 @@
 #import "AITodoManager.h"
 #import "AISettings.h"
 #import "TodoEditorViewController.h"
+#import "TodoListViewController.h"
+#import "TodoStatsViewController.h"
 #import "AIConfig.h"
 
 extern void todoEnsureAccount(void); // 由 WeChatTodoTweak.m 提供
@@ -98,9 +100,13 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 @property (nonatomic, strong) UILabel *monthLabel;
 @property (nonatomic, strong) UIView *calendarCard;
 @property (nonatomic, strong) UICollectionView *calendarView;
-@property (nonatomic, strong) UIButton *bookmarkButton;
-@property (nonatomic, strong) UIButton *statsButton;
-@property (nonatomic, assign) BOOL bookmarkMode;
+@property (nonatomic, strong) UIView *filterCard;
+@property (nonatomic, strong) UIButton *allTodosRow;
+@property (nonatomic, strong) UIButton *bookmarkRow;
+@property (nonatomic, strong) UIButton *statsRow;
+@property (nonatomic, strong) UILabel *allTodosValueLabel;
+@property (nonatomic, strong) UILabel *bookmarkValueLabel;
+@property (nonatomic, strong) UILabel *statsValueLabel;
 @property (nonatomic, strong) UILabel *listHeaderLabel;
 @property (nonatomic, strong) UIButton *todayButton;
 @property (nonatomic, strong) UITableView *tableView;
@@ -226,23 +232,47 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     [self.calendarView registerClass:[CalendarDayCell class] forCellWithReuseIdentifier:@"DayCell"];
     [self.calendarCard addSubview:self.calendarView];
 
-    // 底部行：全部书签（筛选视图）+ 统计
-    // 全部书签 / 今日统计：放在日历卡片下方（页面背景上）
-    self.bookmarkButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
-    self.bookmarkButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    self.bookmarkButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    self.bookmarkButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
-    [self.bookmarkButton addTarget:self action:@selector(toggleBookmarkMode) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.bookmarkButton];
+    // 全部待办 / 全部书签 / 今日统计：日历卡片下方，设置条目样式
+    [self buildFilterCard];
+}
 
-    self.statsButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.statsButton setTitle:@"今日统计" forState:UIControlStateNormal];
-    self.statsButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    self.statsButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
-    self.statsButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
-    [self.statsButton addTarget:self action:@selector(statsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.statsButton];
+// 三行筛选入口卡片（样式对齐设置页条目：标题 + 右侧数字/箭头）
+- (void)buildFilterCard {
+    self.filterCard = [[UIView alloc] initWithFrame:CGRectZero];
+    self.filterCard.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    self.filterCard.layer.cornerRadius = 12;
+    self.filterCard.layer.masksToBounds = YES;
+    [self.view addSubview:self.filterCard];
+
+    self.allTodosRow = [self makeFilterRow:@"全部待办" action:@selector(openAllTodos)];
+    self.bookmarkRow = [self makeFilterRow:@"全部书签" action:@selector(openBookmarks)];
+    self.statsRow = [self makeFilterRow:@"今日统计" action:@selector(openStats)];
+
+    self.allTodosValueLabel = [self makeFilterValue];
+    self.bookmarkValueLabel = [self makeFilterValue];
+    self.statsValueLabel = [self makeFilterValue];
+    self.statsValueLabel.text = @"›";
+}
+
+- (UIButton *)makeFilterRow:(NSString *)title action:(SEL)action {
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [btn setTitle:title forState:UIControlStateNormal];
+    [btn setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
+    btn.titleLabel.font = [UIFont systemFontOfSize:16];
+    btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    btn.titleEdgeInsets = UIEdgeInsetsMake(0, 16, 0, 0);
+    [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    [self.filterCard addSubview:btn];
+    return btn;
+}
+
+- (UILabel *)makeFilterValue {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.font = [UIFont systemFontOfSize:15];
+    label.textColor = [UIColor secondaryLabelColor];
+    label.textAlignment = NSTextAlignmentRight;
+    [self.filterCard addSubview:label];
+    return label;
 }
 
 - (void)rebuildDays {
@@ -370,74 +400,50 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 }
 
 - (void)reloadList {
-    if (self.bookmarkMode) {
-        // 全部书签视图：跨日期汇总
-        NSMutableArray *arr = [NSMutableArray array];
-        for (MainTodoItem *m in [AITodoManager allTodos]) {
-            if (m.isBookmarked) [arr addObject:m];
-        }
-        [arr sortUsingComparator:^NSComparisonResult(MainTodoItem *a, MainTodoItem *b) {
-            return [a.createTime compare:b.createTime];
-        }];
-        self.listTodos = arr;
-        self.listHeaderLabel.text = [NSString stringWithFormat:@"全部书签（%lu）",
-                                     (unsigned long)arr.count];
+    self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    BOOL isToday = [[cal startOfDayForDate:self.selectedDay] isEqualToDate:
+                    [cal startOfDayForDate:[NSDate date]]];
+    if (isToday) {
+        self.listHeaderLabel.text = [NSString stringWithFormat:@"今日待办（%lu）",
+                                     (unsigned long)self.listTodos.count];
     } else {
-        self.listTodos = [AITodoManager todosOnDay:self.selectedDay];
-        NSCalendar *cal = [NSCalendar currentCalendar];
-        BOOL isToday = [[cal startOfDayForDate:self.selectedDay] isEqualToDate:
-                        [cal startOfDayForDate:[NSDate date]]];
-        if (isToday) {
-            self.listHeaderLabel.text = [NSString stringWithFormat:@"今日待办（%lu）",
-                                         (unsigned long)self.listTodos.count];
-        } else {
-            NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-            fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
-            fmt.dateFormat = @"M月d日";
-            self.listHeaderLabel.text = [NSString stringWithFormat:@"%@ 待办（%lu）",
-                                         [fmt stringFromDate:self.selectedDay],
-                                         (unsigned long)self.listTodos.count];
-        }
+        NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+        fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+        fmt.dateFormat = @"M月d日";
+        self.listHeaderLabel.text = [NSString stringWithFormat:@"%@ 待办（%lu）",
+                                     [fmt stringFromDate:self.selectedDay],
+                                     (unsigned long)self.listTodos.count];
     }
     [self.tableView reloadData];
     [self refreshDaysWithTodos];
 
-    [self.bookmarkButton setTitle:@"全部书签" forState:UIControlStateNormal];
-    // 与“今日统计”统一淡蓝；书签模式激活时加粗提示
-    self.bookmarkButton.tintColor = [UIColor colorWithRed:0.35 green:0.58 blue:0.95 alpha:1.0];
-    self.bookmarkButton.titleLabel.font =
-        [UIFont systemFontOfSize:13 weight:(self.bookmarkMode ? UIFontWeightBold : UIFontWeightMedium)];
+    // 三个入口的数字实时刷新
+    NSUInteger total = [AITodoManager allTodos].count;
+    NSUInteger bookmarked = 0;
+    for (MainTodoItem *m in [AITodoManager allTodos]) {
+        if (m.isBookmarked) bookmarked++;
+    }
+    self.allTodosValueLabel.text = [NSString stringWithFormat:@"%lu  ›", (unsigned long)total];
+    self.bookmarkValueLabel.text = [NSString stringWithFormat:@"%lu  ›", (unsigned long)bookmarked];
+    self.statsValueLabel.text = @"›";
 
     BOOL empty = (self.listTodos.count == 0);
     self.tableView.hidden = empty;
     self.emptyView.hidden = !empty;
     if (empty) {
-        if (self.bookmarkMode) {
-            self.emptyIconLabel.text = @"🔖";
-            self.emptyLabel.text = @"还没有书签\n右滑卡片即可收藏";
-            self.emptyButton.hidden = YES;
-        } else {
-            self.emptyIconLabel.text = @"📋";
-            self.emptyLabel.text = @"这一天还没有待办";
-            self.emptyButton.hidden = NO;
-        }
+        self.emptyIconLabel.text = @"📋";
+        self.emptyLabel.text = @"这一天还没有待办";
+        self.emptyButton.hidden = NO;
     }
     // 非今天且不在书签模式时，显示“回到今天”
-    NSCalendar *cal2 = [NSCalendar currentCalendar];
-    BOOL isToday = [[cal2 startOfDayForDate:self.selectedDay] isEqualToDate:
-                    [cal2 startOfDayForDate:[NSDate date]]];
-    self.todayButton.hidden = self.bookmarkMode || isToday;
+    self.todayButton.hidden = isToday;
 }
 
 - (void)goToToday {
     self.selectedDay = [NSDate date];
     self.currentMonth = self.selectedDay;
     [self rebuildDays];
-    [self reloadList];
-}
-
-- (void)toggleBookmarkMode {
-    self.bookmarkMode = !self.bookmarkMode;
     [self reloadList];
 }
 
@@ -462,38 +468,36 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
-- (void)statsTapped {
-    NSCalendar *cal = [NSCalendar currentCalendar];
-    NSDate *start = [cal startOfDayForDate:self.selectedDay];
-    NSDate *end = [cal dateByAddingUnit:NSCalendarUnitDay value:1 toDate:start options:0];
-    NSUInteger dayUndone = 0, dayDone = 0;
-    NSArray *all = [AITodoManager allTodos];
-    NSUInteger globalUndone = 0;
-    NSUInteger bookmarked = 0;
-    for (MainTodoItem *m in all) {
-        if (!m.done) globalUndone++;
-        if (m.isBookmarked) bookmarked++;
-        if ([m.createTime compare:start] != NSOrderedAscending &&
-            [m.createTime compare:end] == NSOrderedAscending) {
-            if (m.done) dayDone++;
-            else dayUndone++;
-        }
+#pragma mark - 二级页面（全部待办 / 全部书签 / 今日统计）
+
+- (void)openAllTodos {
+    [self presentListPage:[TodoListViewController allPage]];
+}
+
+- (void)openBookmarks {
+    [self presentListPage:[TodoListViewController bookmarkPage]];
+}
+
+- (void)openStats {
+    [self presentListPage:[[TodoStatsViewController alloc] init]];
+}
+
+- (void)presentListPage:(UIViewController *)vc {
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    // 与编辑页一致：导航栏不透明白，避免顶部透明
+    nav.navigationBar.translucent = NO;
+    nav.navigationBar.barTintColor = [UIColor systemBackgroundColor];
+    if (@available(iOS 13.0, *)) {
+        UINavigationBarAppearance *app = [[UINavigationBarAppearance alloc] init];
+        [app configureWithOpaqueBackground];
+        app.backgroundColor = [UIColor systemBackgroundColor];
+        app.shadowColor = [UIColor clearColor];
+        nav.navigationBar.standardAppearance = app;
+        nav.navigationBar.scrollEdgeAppearance = app;
     }
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
-    fmt.dateFormat = @"M月d日";
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"统计"
-                                                                message:[NSString stringWithFormat:
-                                                                         @"%@（当前所选）\n当日：未完成 %lu · 已完成 %lu\n\n全部：%lu 条（未完成 %lu · 已书签 %lu）",
-                                                                         [fmt stringFromDate:self.selectedDay],
-                                                                         (unsigned long)dayUndone,
-                                                                         (unsigned long)dayDone,
-                                                                         (unsigned long)all.count,
-                                                                         (unsigned long)globalUndone,
-                                                                         (unsigned long)bookmarked]
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    [al addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:al animated:YES completion:nil];
+    nav.view.backgroundColor = [UIColor systemBackgroundColor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)addTapped {
@@ -672,7 +676,6 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     self.selectedDay = self.days[indexPath.row];
     self.currentMonth = self.selectedDay;
-    self.bookmarkMode = NO; // 点日期回到按天视图
     [self.calendarView reloadData];
     [self updateMonthLabel];
     [self reloadList];
@@ -786,12 +789,17 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
         self.didInitialScroll = YES;
         [self scrollToSelectedDayAnimated:NO]; // 首次布局后再定位到今天，保证可见
     }
-    // 全部书签 / 今日统计：日历卡片下方（拉开间距）
+    // 全部待办 / 全部书签 / 今日统计：日历卡片下方，设置条目样式卡片
     CGFloat rowY = cardY + cardH + 10;
-    self.bookmarkButton.frame = CGRectMake(cardX, rowY, cardW / 2.0, 28);
-    self.statsButton.frame = CGRectMake(cardX + cardW / 2.0, rowY, cardW / 2.0, 28);
+    self.filterCard.frame = CGRectMake(cardX, rowY, cardW, 144);
+    self.allTodosRow.frame = CGRectMake(0, 0, cardW, 48);
+    self.allTodosValueLabel.frame = CGRectMake(cardW - 116, 0, 100, 48);
+    self.bookmarkRow.frame = CGRectMake(0, 48, cardW, 48);
+    self.bookmarkValueLabel.frame = CGRectMake(cardW - 116, 48, 100, 48);
+    self.statsRow.frame = CGRectMake(0, 96, cardW, 48);
+    self.statsValueLabel.frame = CGRectMake(cardW - 116, 96, 100, 48);
 
-    CGFloat headerY = rowY + 28 + 12;
+    CGFloat headerY = rowY + 144 + 12;
     self.listHeaderLabel.frame = CGRectMake(16, headerY, w - 130, 24); // 与上面按钮左对齐
     self.todayButton.frame = CGRectMake(w - 110, headerY, 90, 24);
 

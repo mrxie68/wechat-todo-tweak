@@ -23,7 +23,8 @@ clang \
   -o wechat-todo.dylib \
   AISettings.m AITodoManager.m SubTaskItem.m MainTodoItem.m \
   TodoEditorViewController.m \
-  TodoSettingsViewController.m CustomCalendarTodoViewController.m CustomTodoTableViewCell.m WeChatTodoTweak.m \
+  TodoSettingsViewController.m CustomCalendarTodoViewController.m CustomTodoTableViewCell.m \
+  TodoListViewController.m TodoStatsViewController.m WeChatTodoTweak.m \
   > build.log 2>&1
 RC=$?
 set -e

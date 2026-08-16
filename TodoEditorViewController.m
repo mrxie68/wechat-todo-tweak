@@ -103,8 +103,11 @@
     CGRect b = self.view.bounds;
     CGFloat bottom = b.size.height - self.keyboardInset;
     self.textView.frame = CGRectMake(16, 12, b.size.width - 32, bottom - 12 - 34);
-    self.placeholderLabel.frame = CGRectMake(16 + 12 + 4, 12 + 16 + 2,
-                                             b.size.width - 32 - 32, 24);
+    // 占位提示与输入光标对齐：左边缘 = 文本框左边 + 文字内边距，
+    // 上边缘 = 文本框顶部 + 上内边距 - 2（UILabel 单行文本垂直居中偏下，微调上移）
+    self.placeholderLabel.frame = CGRectMake(self.textView.frame.origin.x + 12,
+                                             self.textView.frame.origin.y + 16 - 2,
+                                             self.textView.frame.size.width - 24, 24);
     self.countLabel.frame = CGRectMake(16, CGRectGetMaxY(self.textView.frame) + 6,
                                        b.size.width - 32, 20);
 }
