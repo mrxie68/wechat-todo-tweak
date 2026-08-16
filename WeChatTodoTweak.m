@@ -364,6 +364,9 @@ static BOOL todoTabCrashGuard(void) {
 static UIWindow *g_todoWindow = nil;
 static UIView *g_todoTabContainer = nil;
 static UIView *g_todoTabItemView = nil;
+static UITabBarItem *g_todoNativeItem = nil; // 原生 UITabBarItem 方式
+static NSInteger g_originalTabCount = 0;
+static UITabBarItem *g_lastSelectedItem = nil;
 static UIViewController *g_todoOverlayVC = nil;
 static UIImageView *g_todoTabIcon = nil;
 static UILabel *g_todoTabLabel = nil;
@@ -459,10 +462,13 @@ static void relayoutTodoTabItems(void) {
     NSArray *buttons = viewsWithName(container, @"TabBarButton");
     NSArray *items = viewsWithName(container, @"TabBarItem");
     NSUInteger N = detectTabCount(container);
+    if (g_todoNativeItem && g_originalTabCount >= 3) {
+        N = g_originalTabCount; // 原生模式下按原始 tab 数均分
+    }
     if (N < 3) return;
     CGFloat slotW = cw / (N + 1.0);
 
-    if (buttons.count == N) {
+    if (buttons.count == N && !g_todoNativeItem) {
         for (NSUInteger i = 0; i < N; i++) {
             UIView *b = buttons[i];
             CGRect f = b.frame;
@@ -471,20 +477,17 @@ static void relayoutTodoTabItems(void) {
             b.frame = f;
         }
     }
-    if (items.count == N) {
-        // 内容视图就近对齐到对应按钮槽位（新版微信图标相对按钮有偏移）
-        for (UIView *it in items) {
-            CGFloat center = it.frame.origin.x + it.frame.size.width / 2.0;
-            NSInteger best = 0;
-            CGFloat bestDist = CGFLOAT_MAX;
-            for (NSUInteger i = 0; i < buttons.count; i++) {
-                UIView *b = buttons[i];
-                CGFloat bcenter = b.frame.origin.x + b.frame.size.width / 2.0;
-                CGFloat d = fabs(center - bcenter);
-                if (d < bestDist) { bestDist = d; best = (NSInteger)i; }
-            }
+    if (items.count >= N) {
+        // 内容视图按 x 排序后依次分配到槽位 0..N-1，避免就近匹配把两个挤到同一槽
+        NSArray *sorted = [items sortedArrayUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+            if (a.frame.origin.x < b.frame.origin.x) return NSOrderedAscending;
+            if (a.frame.origin.x > b.frame.origin.x) return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+        for (NSUInteger i = 0; i < N && i < sorted.count; i++) {
+            UIView *it = sorted[i];
             CGRect f = it.frame;
-            f.origin.x = best * slotW;
+            f.origin.x = i * slotW;
             f.size.width = slotW;
             it.frame = f;
         }
@@ -659,7 +662,22 @@ UIColor *todoWeChatBackgroundColor(void) {
 // 保险：微信切换 tab 时也关闭待办页（覆盖手势没接住的情况）
 static void (*orig_setSelectedIndex)(id, SEL, NSInteger);
 static void swz_setSelectedIndex(id self, SEL _cmd, NSInteger index) {
+    if (g_todoNativeItem && index >= g_originalTabCount) {
+        // 我们的待办 tab：不切换控制器，只打开待办页，并把选中恢复成上一个真实 tab
+        if (g_todoTabContainer && g_lastSelectedItem) {
+            @try {
+                [(UITabBar *)g_todoTabContainer setSelectedItem:g_lastSelectedItem];
+            } @catch (NSException *e) {}
+        }
+        openTodoOverlay();
+        return;
+    }
     if (orig_setSelectedIndex) orig_setSelectedIndex(self, _cmd, index);
+    if (g_todoNativeItem && g_todoTabContainer) {
+        @try {
+            g_lastSelectedItem = [(UITabBar *)g_todoTabContainer selectedItem];
+        } @catch (NSException *e) {}
+    }
     closeTodoOverlay();
 }
 static void (*orig_setSelectedViewController)(id, SEL, id);
@@ -669,7 +687,21 @@ static void swz_setSelectedViewController(id self, SEL _cmd, id vc) {
 }
 static void (*orig_tabBarDidSelect)(id, SEL, id, id);
 static void swz_tabBarDidSelect(id self, SEL _cmd, id tb, id item) {
+    if (g_todoNativeItem && item == g_todoNativeItem) {
+        // 我们的待办 tab：打开待办页并恢复选中，不调用原实现（防止切到不存在的页）
+        if (g_lastSelectedItem) {
+            @try {
+                [(UITabBar *)tb setSelectedItem:g_lastSelectedItem];
+            } @catch (NSException *e) {}
+        } else {
+            NSArray *items = [(UITabBar *)tb items];
+            if (items.count > 0) [(UITabBar *)tb setSelectedItem:items[0]];
+        }
+        openTodoOverlay();
+        return;
+    }
     if (orig_tabBarDidSelect) orig_tabBarDidSelect(self, _cmd, tb, item);
+    g_lastSelectedItem = item;
     closeTodoOverlay();
 }
 
@@ -757,6 +789,32 @@ static void installTodoTabItem(void) {
                 g_todoTabTarget = [[TodoTabTarget alloc] init];
             }
 
+            // —— 原生 UITabBarItem：系统自己排 5 个按钮，ThemeBox 也能接管 ——
+            BOOL nativeOK = NO;
+            if ([container isKindOfClass:[UITabBar class]]) {
+                @try {
+                    UITabBar *tb = (UITabBar *)container;
+                    NSArray *items = tb.items;
+                    if (items.count >= 3 && items.count <= 5) {
+                        UIImage *icon = [UIImage systemImageNamed:@"checklist"];
+                        if (!icon) icon = [UIImage systemImageNamed:@"checkmark.circle"];
+                        UITabBarItem *nativeItem =
+                            [[UITabBarItem alloc] initWithTitle:@"待办" image:icon selectedImage:icon];
+                        nativeItem.tag = 10086;
+                        NSMutableArray *arr = [items mutableCopy];
+                        [arr addObject:nativeItem];
+                        [tb setItems:arr animated:NO];
+                        g_todoNativeItem = nativeItem;
+                        g_originalTabCount = items.count;
+                        nativeOK = YES;
+                        diagLog(@"已用原生 UITabBarItem 添加待办 tab（原 %lu 个）",
+                                (unsigned long)items.count);
+                    }
+                } @catch (NSException *e) {
+                    NSLog(kAITodoLogPrefix "原生 tab 添加异常: %@", e);
+                }
+            }
+
             CGFloat newW = container.bounds.size.width / (tabCount + 1.0);
             CGFloat itemY = 0, itemH = 55.0;
             for (UIView *s in container.subviews) {
@@ -786,7 +844,10 @@ static void installTodoTabItem(void) {
             }
             // 其它 4 个 tab 点击时关闭待办页（按钮和 item 都挂，确保生效）
             NSArray *otherButtons = viewsWithName(container, @"TabBarButton");
-            for (UIView *iv in otherButtons) {
+            NSUInteger buttonLimit = otherButtons.count;
+            if (g_todoNativeItem && buttonLimit > 0) buttonLimit--; // 最后一个是我们自己的原生按钮
+            for (NSUInteger bi = 0; bi < buttonLimit; bi++) {
+                UIView *iv = otherButtons[bi];
                 UITapGestureRecognizer *t =
                     [[UITapGestureRecognizer alloc] initWithTarget:g_todoTabTarget
                                                             action:@selector(otherTabTapped)];
@@ -801,8 +862,8 @@ static void installTodoTabItem(void) {
                 t.cancelsTouchesInView = NO;
                 [iv addGestureRecognizer:t];
             }
-            diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu）",
-                    NSStringFromClass(cls), (unsigned long)tabCount);
+            diagLog(@"底部菜单已加待办tab（容器=%@ 原tab=%lu 原生=%d）",
+                    NSStringFromClass(cls), (unsigned long)tabCount, nativeOK);
             installTabSwitchHook();
         } @catch (NSException *e) {
             NSLog(kAITodoLogPrefix "tab 注入异常（已跳过）: %@", e);
