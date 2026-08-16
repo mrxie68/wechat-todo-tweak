@@ -94,7 +94,6 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 @property (nonatomic, strong) NSMutableArray<NSDate *> *days;
 @property (nonatomic, strong) UIView *topBar;
 @property (nonatomic, strong) UIButton *closeButton;
-@property (nonatomic, strong) UIButton *addButton;
 @property (nonatomic, strong) UIButton *prevMonthButton;
 @property (nonatomic, strong) UIButton *nextMonthButton;
 @property (nonatomic, strong) UILabel *monthLabel;
@@ -109,6 +108,7 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
 @property (nonatomic, strong) UILabel *statsValueLabel;
 @property (nonatomic, strong) UILabel *listHeaderLabel;
 @property (nonatomic, strong) UIButton *todayButton;
+@property (nonatomic, strong) UIButton *addFooterButton;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIView *emptyView;
 @property (nonatomic, strong) UILabel *emptyIconLabel;
@@ -167,9 +167,14 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     self.topBar = [[UIView alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.topBar];
 
-    self.closeButton = [self topBarButton:@"xmark"];
-    [self.closeButton addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.topBar addSubview:self.closeButton];
+    // 内嵌打开（底部菜单 tab）时顶部不显示关闭/添加按钮：
+    // 再点一次待办 tab 或切走即关闭；添加走列表底部“再添加一条待办”。
+    // 从设置页整页弹出时保留关闭按钮，避免没有返回路径。
+    if (self.presentingViewController) {
+        self.closeButton = [self topBarButton:@"xmark"];
+        [self.closeButton addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self.topBar addSubview:self.closeButton];
+    }
 
     UILabel *title = [[UILabel alloc] initWithFrame:CGRectZero];
     title.text = @"待办";
@@ -177,10 +182,6 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     title.textAlignment = NSTextAlignmentCenter;
     title.tag = 101;
     [self.topBar addSubview:title];
-
-    self.addButton = [self topBarButton:@"plus.circle"];
-    [self.addButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.topBar addSubview:self.addButton];
 }
 
 - (UIButton *)topBarButton:(NSString *)symbol {
@@ -397,6 +398,16 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     self.emptyButton.layer.cornerRadius = 20;
     [self.emptyButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.emptyView addSubview:self.emptyButton];
+
+    // 列表底部“再添加一条待办”
+    self.addFooterButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.addFooterButton setTitle:@"＋ 再添加一条待办" forState:UIControlStateNormal];
+    [self.addFooterButton setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
+    self.addFooterButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    [self.addFooterButton addTarget:self action:@selector(addTapped) forControlEvents:UIControlEventTouchUpInside];
+    self.addFooterButton.frame = CGRectMake(0, 0, self.view.bounds.size.width, 56);
+    self.addFooterButton.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    self.tableView.tableFooterView = self.addFooterButton;
 }
 
 - (void)reloadList {
@@ -768,12 +779,11 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     }
     CGFloat w = b.size.width;
 
-    // 顶栏：只留关闭 + 添加
+    // 顶栏：标题居中；整页弹出时才显示关闭按钮
     self.topBar.frame = CGRectMake(0, 0, w, sa.top + 48);
-    self.closeButton.frame = CGRectMake(8, sa.top, 44, 44);
-    self.addButton.frame = CGRectMake(w - 52, sa.top, 44, 44);
+    if (self.closeButton) self.closeButton.frame = CGRectMake(8, sa.top, 44, 44);
     UILabel *title = [self.topBar viewWithTag:101];
-    title.frame = CGRectMake(100, sa.top, w - 200, 44);
+    title.frame = CGRectMake(16, sa.top, w - 32, 44);
 
     // 白色日历卡片：月份行 + 日期条 + 底部行（书签/统计）
     CGFloat cardX = 16, cardW = w - 32; // 与页面其它元素同边距
@@ -800,7 +810,8 @@ extern UIColor *todoWeChatBackgroundColor(void); // 微信页面背景
     self.statsValueLabel.frame = CGRectMake(cardW - 116, 96, 100, 48);
 
     CGFloat headerY = rowY + 144 + 12;
-    self.listHeaderLabel.frame = CGRectMake(16, headerY, w - 130, 24); // 与上面按钮左对齐
+    self.listHeaderLabel.frame = CGRectMake(16, headerY, w - 32, 24);
+    self.listHeaderLabel.textAlignment = NSTextAlignmentCenter;
     self.todayButton.frame = CGRectMake(w - 110, headerY, 90, 24);
 
     CGFloat tableY = headerY + 24 + 4;

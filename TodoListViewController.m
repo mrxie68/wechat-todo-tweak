@@ -1,6 +1,7 @@
 #import "TodoListViewController.h"
 #import "AITodoManager.h"
 #import "TodoEditorViewController.h"
+#import "CustomTodoTableViewCell.h"
 #import "AIConfig.h"
 
 @interface TodoListViewController () <UITableViewDataSource, UITableViewDelegate>
@@ -8,6 +9,7 @@
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<MainTodoItem *> *items;
 @property (nonatomic, strong) UILabel *emptyLabel;
+@property (nonatomic, strong) NSMutableSet *expandedIds; // 展开状态只存内存
 @end
 
 @implementation TodoListViewController
@@ -37,10 +39,12 @@
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
                                                       target:self
                                                       action:@selector(addTapped)];
+    self.expandedIds = [NSMutableSet set];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.tableView.rowHeight = 64;
+    self.tableView.backgroundColor = [UIColor clearColor];
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     [self.view addSubview:self.tableView];
@@ -87,110 +91,164 @@
 }
 
 - (void)addTapped {
-    TodoEditorViewController *vc = [[TodoEditorViewController alloc] initWithTitle:@"新建待办"
-                                                                      initialText:@""
-                                                                       completion:^(NSString *text) {
-        if (text.length == 0) return;
-        MainTodoItem *m = [AITodoManager addTodo:text];
+    [self presentMultilineInputWithTitle:@"新建待办"
+                             initialText:@""
+                              completion:^(NSString *text) {
+        NSString *trimmed = [text stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmed.length == 0) return;
+        MainTodoItem *m = [AITodoManager addTodo:trimmed];
         if (self.bookmarkMode && m) {
-            [AITodoManager toggleBookmarkForTodo:m.identifier]; // 书签页新建默认加书签，方便继续记录
+            [AITodoManager toggleBookmarkForTodo:m.identifier]; // 书签页新建默认加书签
         }
         [self reloadData];
     }];
+}
+
+#pragma mark - 编辑/子任务（与主页行为一致）
+
+- (void)presentMultilineInputWithTitle:(NSString *)title
+                           initialText:(NSString *)initial
+                            completion:(void (^)(NSString *text))completion {
+    TodoEditorViewController *vc = [[TodoEditorViewController alloc] initWithTitle:title
+                                                                      initialText:initial
+                                                                       completion:completion];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    nav.navigationBar.translucent = NO;
+    nav.navigationBar.barTintColor = [UIColor systemBackgroundColor];
+    if (@available(iOS 13.0, *)) {
+        UINavigationBarAppearance *app = [[UINavigationBarAppearance alloc] init];
+        [app configureWithOpaqueBackground];
+        app.backgroundColor = [UIColor systemBackgroundColor];
+        app.shadowColor = [UIColor clearColor];
+        nav.navigationBar.standardAppearance = app;
+        nav.navigationBar.scrollEdgeAppearance = app;
+    }
+    nav.view.backgroundColor = [UIColor systemBackgroundColor];
     [self presentViewController:nav animated:YES completion:nil];
 }
 
-#pragma mark - 时间格式化
-
-- (NSString *)dateTextForItem:(MainTodoItem *)item {
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
-    NSCalendar *cal = [NSCalendar currentCalendar];
-    if ([[cal startOfDayForDate:item.createTime] isEqualToDate:
-         [cal startOfDayForDate:[NSDate date]]]) {
-        fmt.dateFormat = @"今天 HH:mm";
-    } else {
-        fmt.dateFormat = @"M月d日 HH:mm";
-    }
-    return [fmt stringFromDate:item.createTime];
+- (void)editTitleForTodo:(MainTodoItem *)todo {
+    [self presentMultilineInputWithTitle:@"编辑待办"
+                             initialText:todo.title
+                              completion:^(NSString *text) {
+        [AITodoManager updateTodo:todo.identifier
+                            title:text
+                             note:todo.note
+                              due:todo.dueDate
+                       bookmarked:todo.isBookmarked];
+        [self reloadData];
+    }];
 }
 
-#pragma mark - UITableView
+- (void)addSubTaskForTodo:(MainTodoItem *)todo {
+    [self presentMultilineInputWithTitle:@"添加子任务"
+                             initialText:@""
+                              completion:^(NSString *text) {
+        [AITodoManager addSubTask:text toTodo:todo.identifier];
+        [self.expandedIds addObject:@(todo.identifier)];
+        [self reloadData];
+    }];
+}
+
+- (void)editSubTask:(SubTaskItem *)sub inTodo:(MainTodoItem *)todo {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:nil
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"编辑"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        [self presentMultilineInputWithTitle:@"编辑子任务"
+                                 initialText:sub.title
+                                  completion:^(NSString *text) {
+            [AITodoManager renameSubTask:sub.identifier inTodo:todo.identifier title:text];
+            [self reloadData];
+        }];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"删除"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *action) {
+        [AITodoManager removeSubTask:sub.identifier inTodo:todo.identifier];
+        [self reloadData];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+#pragma mark - UITableView（复用主页浅紫色条目）
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.items.count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *rid = @"TodoListCell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:rid];
+    CustomTodoTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"TodoCardCell"];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                      reuseIdentifier:rid];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell = [[CustomTodoTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                              reuseIdentifier:@"TodoCardCell"];
     }
-    MainTodoItem *m = self.items[indexPath.row];
-    NSString *title = m.title.length > 0 ? m.title : @"（无标题）";
-    cell.textLabel.font = [UIFont systemFontOfSize:16];
-    cell.textLabel.textColor = m.done ? [UIColor secondaryLabelColor] : [UIColor labelColor];
-    NSDictionary *attrs = m.done ? @{NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)} : nil;
-    cell.textLabel.attributedText = [[NSAttributedString alloc] initWithString:title attributes:attrs];
-    cell.detailTextLabel.text = [self dateTextForItem:m];
-    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-    cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
-
-    // 书签角标
-    UILabel *bm = [UILabel new];
-    bm.text = m.isBookmarked ? @"🔖" : @"";
-    bm.font = [UIFont systemFontOfSize:16];
-    [bm sizeToFit];
-    cell.accessoryView = bm;
+    MainTodoItem *todo = self.items[indexPath.row];
+    todo.isSelected = [self.expandedIds containsObject:@(todo.identifier)];
+    [cell configureWithTodo:todo];
+    cell.onToggleSelect = ^{
+        if ([self.expandedIds containsObject:@(todo.identifier)]) {
+            [self.expandedIds removeObject:@(todo.identifier)];
+        } else {
+            [self.expandedIds addObject:@(todo.identifier)];
+        }
+        [self reloadData];
+    };
+    cell.onAddSubTask = ^{
+        [self addSubTaskForTodo:todo];
+    };
+    cell.onToggleSubTask = ^(SubTaskItem *sub) {
+        [AITodoManager toggleSubTask:sub.identifier inTodo:todo.identifier];
+        [self reloadData];
+    };
+    cell.onEditSubTask = ^(SubTaskItem *sub) {
+        [self editSubTask:sub inTodo:todo];
+    };
+    cell.onLongPress = ^{
+        [self editTitleForTodo:todo];
+    };
     return cell;
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    MainTodoItem *m = self.items[indexPath.row];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:m.title
-                                                                   message:[self dateTextForItem:m]
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:(m.done ? @"标记未完成" : @"标记完成")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *a) {
-        [AITodoManager markTodo:m.identifier done:!m.done];
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    MainTodoItem *todo = self.items[indexPath.row];
+    todo.isSelected = [self.expandedIds containsObject:@(todo.identifier)];
+    return [CustomTodoTableViewCell heightForTodo:todo width:tableView.bounds.size.width];
+}
+
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
+    trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    MainTodoItem *todo = self.items[indexPath.row];
+    UIContextualAction *del = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleDestructive
+                            title:@"删除"
+                          handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+        [AITodoManager deleteTodo:todo.identifier];
         [self reloadData];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"编辑内容"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *a) {
-        TodoEditorViewController *vc = [[TodoEditorViewController alloc] initWithTitle:@"编辑待办"
-                                                                          initialText:m.title
-                                                                           completion:^(NSString *text) {
-            if (text.length == 0) return;
-            [AITodoManager updateTodo:m.identifier title:text note:m.note
-                                  due:m.dueDate bookmarked:m.isBookmarked];
-            [self reloadData];
-        }];
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-        nav.modalPresentationStyle = UIModalPresentationFullScreen;
-        [self presentViewController:nav animated:YES completion:nil];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:(m.isBookmarked ? @"取消收藏" : @"收藏")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *a) {
-        [AITodoManager toggleBookmarkForTodo:m.identifier];
+        completion(YES);
+    }];
+    return [UISwipeActionsConfiguration configurationWithActions:@[del]];
+}
+
+// 右滑 = 收藏/取消收藏
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
+    leadingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    MainTodoItem *todo = self.items[indexPath.row];
+    UIContextualAction *bookmark = [UIContextualAction
+        contextualActionWithStyle:UIContextualActionStyleNormal
+                            title:todo.isBookmarked ? @"取消书签" : @"书签"
+                          handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+        [AITodoManager toggleBookmarkForTodo:todo.identifier];
         [self reloadData];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"删除"
-                                              style:UIAlertActionStyleDestructive
-                                            handler:^(UIAlertAction *a) {
-        [AITodoManager deleteTodo:m.identifier];
-        [self reloadData];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:sheet animated:YES completion:nil];
+        completion(YES);
+    }];
+    bookmark.backgroundColor = [UIColor colorWithRed:0.88 green:0.65 blue:0.18 alpha:1.0]; // 金色
+    return [UISwipeActionsConfiguration configurationWithActions:@[bookmark]];
 }
 
 @end

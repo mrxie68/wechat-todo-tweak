@@ -514,6 +514,48 @@ static void swz_tabLayoutSubviews(id self, SEL _cmd) {
 static void openTodoOverlay(void);
 static void closeTodoOverlay(void);
 
+static void *kTodoTabDimmedKey = &kTodoTabDimmedKey;
+static void *kTodoTabOrigLabelColorKey = &kTodoTabOrigLabelColorKey;
+static void *kTodoTabOrigIconColorKey = &kTodoTabOrigIconColorKey;
+
+// 待办页打开时，把其它 tab 的选中高亮临时熄灭，避免“待办和其它菜单同时绿色”；
+// 关闭时按进入前保存的颜色精确还原（不猜微信的绿色值）
+static void todoDimOtherTabs(BOOL dim) {
+    UIView *container = g_todoTabContainer;
+    if (!container) return;
+    @try {
+        NSArray *items = viewsWithName(container, @"TabBarItem");
+        for (UIView *item in items) {
+            UILabel *label = nil;
+            UIImageView *icon = nil;
+            for (UIView *sv in item.subviews) {
+                if (!label && [sv isKindOfClass:[UILabel class]]) label = (UILabel *)sv;
+                if (!icon && [sv isKindOfClass:[UIImageView class]]) icon = (UIImageView *)sv;
+            }
+            BOOL wasDimmed = [objc_getAssociatedObject(item, &kTodoTabDimmedKey) boolValue];
+            if (dim) {
+                if (!wasDimmed) {
+                    objc_setAssociatedObject(item, &kTodoTabOrigLabelColorKey,
+                                             label ? label.textColor : [UIColor clearColor],
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    objc_setAssociatedObject(item, &kTodoTabOrigIconColorKey,
+                                             icon ? icon.tintColor : [UIColor clearColor],
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    objc_setAssociatedObject(item, &kTodoTabDimmedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                }
+                if (label) label.textColor = [UIColor labelColor];
+                if (icon) icon.tintColor = [UIColor labelColor];
+            } else if (wasDimmed) {
+                UIColor *lc = objc_getAssociatedObject(item, &kTodoTabOrigLabelColorKey);
+                UIColor *ic = objc_getAssociatedObject(item, &kTodoTabOrigIconColorKey);
+                if (label && lc && ![lc isEqual:[UIColor clearColor]]) label.textColor = lc;
+                if (icon && ic && ![ic isEqual:[UIColor clearColor]]) icon.tintColor = ic;
+                objc_setAssociatedObject(item, &kTodoTabDimmedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
 @interface TodoTabTarget : NSObject
 @end
 
@@ -547,10 +589,12 @@ static TodoTabTarget *g_todoTabTarget = nil;
 }
 
 - (void)pageAppeared {
+    todoDimOtherTabs(YES);
     [self setSelected:YES];
 }
 
 - (void)pageDisappeared {
+    todoDimOtherTabs(NO);
     [self setSelected:NO];
 }
 
@@ -595,6 +639,8 @@ static void openTodoOverlay(void) {
 }
 
 static void closeTodoOverlay(void) {
+    // 关闭时恢复其它 tab 的选中高亮，并把本 tab 复位成未选中色
+    todoDimOtherTabs(NO);
     // 无论是否有关闭目标，都把 tab 图标/文字颜色复位成未选中色，
     // 不依赖页面 disappear 通知（防止通知没触发导致一直绿色）
     if (g_todoTabIcon) g_todoTabIcon.tintColor = [UIColor labelColor];
