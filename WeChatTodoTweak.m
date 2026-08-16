@@ -541,7 +541,7 @@ static TodoTabTarget *g_todoTabTarget = nil;
 }
 
 - (void)setSelected:(BOOL)selected {
-    UIColor *c = selected ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
+    UIColor *c = selected ? [UIColor systemGreenColor] : [UIColor labelColor];
     if (g_todoTabIcon) g_todoTabIcon.tintColor = c;
     if (g_todoTabLabel) g_todoTabLabel.textColor = c;
 }
@@ -712,7 +712,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     } else {
         iv.image = [UIImage systemImageNamed:@"square.and.pencil"];
     }
-    iv.tintColor = [UIColor systemGrayColor];
+    iv.tintColor = [UIColor labelColor]; // 未选中：黑线（深色模式自动变白），和微信一致
     [item addSubview:iv];
     g_todoTabIcon = iv;
 
@@ -720,7 +720,7 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, labelY, width, 12)];
     label.text = @"待办";
     label.font = [UIFont systemFontOfSize:10];
-    label.textColor = [UIColor systemGrayColor];
+    label.textColor = [UIColor labelColor];
     label.textAlignment = NSTextAlignmentCenter;
     [item addSubview:label];
     g_todoTabLabel = label;
