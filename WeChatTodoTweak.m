@@ -350,6 +350,8 @@ static void runTodoContactCleanupOnce(void) {
 #pragma mark - 底部菜单加“待办”tab
 
 static void diagLog(NSString *fmt, ...); // 前向声明（定义在下方）
+static void todoDeselectNativeTabs(BOOL saveSelection);
+static void todoUndoForcedItems(void);
 
 static BOOL g_todoSkipInjection = NO; // 本次启动是否跳过 tab 注入（构造时决定）
 
@@ -505,6 +507,8 @@ static void swz_tabLayoutSubviews(id self, SEL _cmd) {
         g_inTabRelayout = YES;
         @try {
             relayoutTodoTabItems();
+            // 微信重排时可能把绿色刷回来，待办页开着就持续压住
+            if (g_todoOverlayVC) todoDeselectNativeTabs(NO);
         } @catch (NSException *e) {}
         g_inTabRelayout = NO;
     }
@@ -513,47 +517,167 @@ static void swz_tabLayoutSubviews(id self, SEL _cmd) {
 // 前向声明（定义在下方）
 static void openTodoOverlay(void);
 static void closeTodoOverlay(void);
+static void closeTodoOverlayForTabSwitch(void);
 
-static void *kTodoTabDimmedKey = &kTodoTabDimmedKey;
+static void *kTodoForcedKey = &kTodoForcedKey;
 static void *kTodoTabOrigLabelColorKey = &kTodoTabOrigLabelColorKey;
+static void *kTodoTabOrigAttributedTextKey = &kTodoTabOrigAttributedTextKey;
 static void *kTodoTabOrigIconColorKey = &kTodoTabOrigIconColorKey;
 
-// 待办页打开时，把其它 tab 的选中高亮临时熄灭，避免“待办和其它菜单同时绿色”；
-// 关闭时按进入前保存的颜色精确还原（不猜微信的绿色值）
-static void todoDimOtherTabs(BOOL dim) {
+static id g_todoSavedNativeItem = nil;        // 打开待办页时处于选中态的原生 tab 项（弱引用）
+static NSInteger g_todoSavedNativeIndex = -1; // 兜底：按槽位序号还原
+static BOOL g_todoHasSavedSelection = NO;
+
+// 把一个原生 tab 项强制改成未选中外观（防微信 layout 后把绿色刷回来）。
+// 同时用富文本兜底：微信可能用 attributedText 上色，光改 textColor 不生效。
+static void todoForceItemUnselected(UIView *item) {
+    if (!item) return;
+    @try {
+        BOOL forced = [objc_getAssociatedObject(item, &kTodoForcedKey) boolValue];
+        UILabel *label = nil;
+        UIImageView *icon = nil;
+        for (UIView *sv in item.subviews) {
+            if (!label && [sv isKindOfClass:[UILabel class]]) label = (UILabel *)sv;
+            if (!icon && [sv isKindOfClass:[UIImageView class]]) icon = (UIImageView *)sv;
+        }
+        if (!forced) {
+            objc_setAssociatedObject(item, &kTodoForcedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            if (label) {
+                objc_setAssociatedObject(item, &kTodoTabOrigLabelColorKey,
+                                         label.textColor ?: [UIColor clearColor],
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                if (label.attributedText.length) {
+                    objc_setAssociatedObject(item, &kTodoTabOrigAttributedTextKey,
+                                             [label.attributedText copy],
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                }
+            }
+            if (icon) {
+                objc_setAssociatedObject(item, &kTodoTabOrigIconColorKey,
+                                         icon.tintColor ?: [UIColor clearColor],
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+        UIColor *c = [UIColor labelColor];
+        if (label) {
+            label.textColor = c;
+            if (label.attributedText.length && label.attributedText.string.length) {
+                NSMutableDictionary *attrs = [NSMutableDictionary dictionary];
+                if (label.font) attrs[NSFontAttributeName] = label.font;
+                attrs[NSForegroundColorAttributeName] = c;
+                label.attributedText = [[NSAttributedString alloc]
+                                        initWithString:label.attributedText.string
+                                        attributes:attrs];
+            }
+        }
+        if (icon) icon.tintColor = c;
+    } @catch (NSException *e) {}
+}
+
+// 还原被强制改色的原生 tab 项（含富文本原文）
+static void todoUndoForcedItems(void) {
     UIView *container = g_todoTabContainer;
     if (!container) return;
     @try {
         NSArray *items = viewsWithName(container, @"TabBarItem");
         for (UIView *item in items) {
+            if (![objc_getAssociatedObject(item, &kTodoForcedKey) boolValue]) continue;
             UILabel *label = nil;
             UIImageView *icon = nil;
             for (UIView *sv in item.subviews) {
                 if (!label && [sv isKindOfClass:[UILabel class]]) label = (UILabel *)sv;
                 if (!icon && [sv isKindOfClass:[UIImageView class]]) icon = (UIImageView *)sv;
             }
-            BOOL wasDimmed = [objc_getAssociatedObject(item, &kTodoTabDimmedKey) boolValue];
-            if (dim) {
-                if (!wasDimmed) {
-                    objc_setAssociatedObject(item, &kTodoTabOrigLabelColorKey,
-                                             label ? label.textColor : [UIColor clearColor],
-                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                    objc_setAssociatedObject(item, &kTodoTabOrigIconColorKey,
-                                             icon ? icon.tintColor : [UIColor clearColor],
-                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                    objc_setAssociatedObject(item, &kTodoTabDimmedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                }
-                if (label) label.textColor = [UIColor labelColor];
-                if (icon) icon.tintColor = [UIColor labelColor];
-            } else if (wasDimmed) {
-                UIColor *lc = objc_getAssociatedObject(item, &kTodoTabOrigLabelColorKey);
-                UIColor *ic = objc_getAssociatedObject(item, &kTodoTabOrigIconColorKey);
-                if (label && lc && ![lc isEqual:[UIColor clearColor]]) label.textColor = lc;
-                if (icon && ic && ![ic isEqual:[UIColor clearColor]]) icon.tintColor = ic;
-                objc_setAssociatedObject(item, &kTodoTabDimmedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
+            NSAttributedString *ats = objc_getAssociatedObject(item, &kTodoTabOrigAttributedTextKey);
+            UIColor *lc = objc_getAssociatedObject(item, &kTodoTabOrigLabelColorKey);
+            UIColor *ic = objc_getAssociatedObject(item, &kTodoTabOrigIconColorKey);
+            if (label && ats) label.attributedText = ats;
+            if (label && lc && ![lc isEqual:[UIColor clearColor]]) label.textColor = lc;
+            if (icon && ic && ![ic isEqual:[UIColor clearColor]]) icon.tintColor = ic;
+            objc_setAssociatedObject(item, &kTodoForcedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(item, &kTodoTabOrigAttributedTextKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(item, &kTodoTabOrigLabelColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(item, &kTodoTabOrigIconColorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
     } @catch (NSException *e) {}
+}
+
+// 待办页打开时：记录当前选中的原生 tab，并临时把所有原生 tab 置为未选中。
+// 不猜微信的绿色值，直接走微信自己的 setSelected: 机制，关闭时还原。
+static void todoDeselectNativeTabs(BOOL saveSelection) {
+    UIView *container = g_todoTabContainer;
+    if (!container) return;
+    @try {
+        NSArray *items = viewsWithName(container, @"TabBarItem");
+        if (saveSelection && !g_todoHasSavedSelection) {
+            for (NSUInteger i = 0; i < items.count; i++) {
+                UIView *item = items[i];
+                BOOL sel = NO;
+                if ([item respondsToSelector:@selector(setSelected:)]) {
+                    @try { sel = [[item valueForKey:@"selected"] boolValue]; }
+                    @catch (NSException *e) { sel = NO; }
+                }
+                if (sel) {
+                    g_todoSavedNativeItem = item;
+                    g_todoSavedNativeIndex = (NSInteger)i;
+                    g_todoHasSavedSelection = YES;
+                    break;
+                }
+            }
+            // item 读不到 selected 时，用底层 UITabBarButton 的选中态兜底（按槽位对应）
+            if (!g_todoHasSavedSelection) {
+                NSArray *buttons = viewsWithName(container, @"TabBarButton");
+                for (NSUInteger i = 0; i < buttons.count; i++) {
+                    UIView *btn = buttons[i];
+                    BOOL sel = NO;
+                    if ([btn respondsToSelector:@selector(isSelected)]) {
+                        @try { sel = [(id)btn isSelected]; } @catch (NSException *e) { sel = NO; }
+                    }
+                    if (sel) {
+                        g_todoSavedNativeIndex = (NSInteger)i;
+                        if (i < items.count) g_todoSavedNativeItem = items[i];
+                        g_todoHasSavedSelection = YES;
+                        break;
+                    }
+                }
+            }
+        }
+        for (UIView *item in items) {
+            if ([item respondsToSelector:@selector(setSelected:)]) {
+                @try { [(id)item setSelected:NO]; } @catch (NSException *e) {}
+            }
+            [item setNeedsLayout];
+            todoForceItemUnselected(item);
+        }
+        NSArray *buttons = viewsWithName(container, @"TabBarButton");
+        for (UIView *btn in buttons) {
+            if ([btn respondsToSelector:@selector(setSelected:)]) {
+                @try { [(id)btn setSelected:NO]; } @catch (NSException *e) {}
+            }
+            [btn setNeedsLayout];
+        }
+    } @catch (NSException *e) {}
+}
+
+// 关闭待办页且回到之前的 tab：把原生 tab 的选中态还原（setSelected:YES）
+static void todoRestoreNativeTabs(void) {
+    if (!g_todoHasSavedSelection) return;
+    @try {
+        UIView *item = g_todoSavedNativeItem;
+        if ((!item || !item.superview) && g_todoSavedNativeIndex >= 0) {
+            NSArray *items = viewsWithName(g_todoTabContainer, @"TabBarItem");
+            if (g_todoSavedNativeIndex < (NSInteger)items.count) {
+                item = items[g_todoSavedNativeIndex];
+            }
+        }
+        if (item && [item respondsToSelector:@selector(setSelected:)]) {
+            @try { [(id)item setSelected:YES]; } @catch (NSException *e) {}
+            [item setNeedsLayout];
+        }
+    } @catch (NSException *e) {}
+    g_todoSavedNativeItem = nil;
+    g_todoSavedNativeIndex = -1;
+    g_todoHasSavedSelection = NO;
 }
 
 @interface TodoTabTarget : NSObject
@@ -589,12 +713,12 @@ static TodoTabTarget *g_todoTabTarget = nil;
 }
 
 - (void)pageAppeared {
-    todoDimOtherTabs(YES);
+    todoDeselectNativeTabs(YES);
     [self setSelected:YES];
 }
 
 - (void)pageDisappeared {
-    todoDimOtherTabs(NO);
+    todoUndoForcedItems();
     [self setSelected:NO];
 }
 
@@ -611,7 +735,7 @@ static TodoTabTarget *g_todoTabTarget = nil;
 
 - (void)otherTabTapped {
     diagLog(@"其它 tab 点击，关闭待办页");
-    closeTodoOverlay();
+    closeTodoOverlayForTabSwitch();
 }
 
 @end
@@ -638,19 +762,31 @@ static void openTodoOverlay(void) {
     diagLog(@"待办页以内嵌方式打开（底部菜单可见）");
 }
 
-static void closeTodoOverlay(void) {
-    // 关闭时恢复其它 tab 的选中高亮，并把本 tab 复位成未选中色
-    todoDimOtherTabs(NO);
-    // 无论是否有关闭目标，都把 tab 图标/文字颜色复位成未选中色，
-    // 不依赖页面 disappear 通知（防止通知没触发导致一直绿色）
+// restore=YES：回到之前的 tab（再点待办 / 页面关闭按钮），还原原生 tab 选中态
+// restore=NO ：切到其它原生 tab（微信自己会处理选中态），不还原
+static void closeTodoOverlayInternal(BOOL restore) {
+    UIViewController *vc = g_todoOverlayVC;
+    // 先清标记，防止 removeFromSuperview 触发的 layout 又把绿色强制熄灭
+    g_todoOverlayVC = nil;
+    // 还原被强制改色的原生 tab 项（富文本/颜色）
+    todoUndoForcedItems();
+    // 把本 tab 图标/文字颜色复位成未选中色，不依赖页面 disappear 通知
     if (g_todoTabIcon) g_todoTabIcon.tintColor = [UIColor labelColor];
     if (g_todoTabLabel) g_todoTabLabel.textColor = [UIColor labelColor];
-    UIViewController *vc = g_todoOverlayVC;
-    if (!vc) return;
-    [vc.view removeFromSuperview];
-    [vc removeFromParentViewController];
-    g_todoOverlayVC = nil;
+    if (vc) {
+        [vc.view removeFromSuperview];
+        [vc removeFromParentViewController];
+    }
+    if (restore) todoRestoreNativeTabs();
     diagLog(@"待办页已关闭");
+}
+
+static void closeTodoOverlay(void) {
+    closeTodoOverlayInternal(YES);
+}
+
+static void closeTodoOverlayForTabSwitch(void) {
+    closeTodoOverlayInternal(NO);
 }
 
 // 供待办页关闭按钮调用（内嵌模式没有导航栈可退）
@@ -703,18 +839,18 @@ UIColor *todoWeChatBackgroundColor(void) {
 // 保险：微信切换 tab 时也关闭待办页（覆盖手势没接住的情况）
 static void (*orig_setSelectedIndex)(id, SEL, NSInteger);
 static void swz_setSelectedIndex(id self, SEL _cmd, NSInteger index) {
+    closeTodoOverlayForTabSwitch(); // 先关待办页，再让微信自己设置新 tab 选中态
     if (orig_setSelectedIndex) orig_setSelectedIndex(self, _cmd, index);
-    closeTodoOverlay();
 }
 static void (*orig_setSelectedViewController)(id, SEL, id);
 static void swz_setSelectedViewController(id self, SEL _cmd, id vc) {
+    closeTodoOverlayForTabSwitch();
     if (orig_setSelectedViewController) orig_setSelectedViewController(self, _cmd, vc);
-    closeTodoOverlay();
 }
 static void (*orig_tabBarDidSelect)(id, SEL, id, id);
 static void swz_tabBarDidSelect(id self, SEL _cmd, id tb, id item) {
+    closeTodoOverlayForTabSwitch();
     if (orig_tabBarDidSelect) orig_tabBarDidSelect(self, _cmd, tb, item);
-    closeTodoOverlay();
 }
 
 static void installTabSwitchHook(void) {
@@ -923,15 +1059,49 @@ static NSString *todoTabBarProbe(void) {
         [s appendFormat:@"tab 数量: %lu（按钮%lu / 内容视图%lu）\n",
          (unsigned long)detectTabCount(container),
          (unsigned long)buttons.count, (unsigned long)items.count];
+        [s appendString:@"-- 选中态探测 --\n"];
         for (UIView *it in buttons) {
+            NSString *sel = @"-";
+            if ([it respondsToSelector:@selector(isSelected)]) {
+                @try { sel = [(id)it isSelected] ? @"YES" : @"NO"; }
+                @catch (NSException *e) { sel = @"读取失败"; }
+            }
             [s appendFormat:@"  [按钮] %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
              NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
              it.frame.size.width, it.frame.size.height];
+            [s appendFormat:@"          selected=%@\n", sel];
         }
         for (UIView *it in items) {
+            NSString *sel2 = @"-";
+            if ([it respondsToSelector:@selector(setSelected:)]) {
+                @try { sel2 = [[it valueForKey:@"selected"] boolValue] ? @"YES" : @"NO"; }
+                @catch (NSException *e) { sel2 = @"读取失败"; }
+            }
             [s appendFormat:@"  [内容] %@ frame=(%.0f,%.0f,%.0f,%.0f)\n",
              NSStringFromClass([it class]), it.frame.origin.x, it.frame.origin.y,
              it.frame.size.width, it.frame.size.height];
+            [s appendFormat:@"          selected=%@\n", sel2];
+        }
+        NSMutableSet *seenClasses = [NSMutableSet set];
+        for (UIView *it in items) {
+            Class cls = [it class];
+            if ([seenClasses containsObject:NSStringFromClass(cls)]) continue;
+            [seenClasses addObject:NSStringFromClass(cls)];
+            NSMutableArray *selNames = [NSMutableArray array];
+            unsigned int mc = 0;
+            Method *methods = class_copyMethodList(cls, &mc);
+            for (unsigned int i = 0; i < mc; i++) {
+                NSString *name = NSStringFromSelector(method_getName(methods[i]));
+                if ([name rangeOfString:@"elect"].location != NSNotFound ||
+                    [name rangeOfString:@"ighlight"].location != NSNotFound ||
+                    [name rangeOfString:@"olor"].location != NSNotFound) {
+                    [selNames addObject:name];
+                }
+            }
+            if (methods) free(methods);
+            [s appendFormat:@"  [%@] 选中相关方法: %@\n",
+             NSStringFromClass(cls),
+             selNames.count ? [selNames componentsJoinedByString:@", "] : @"无"];
         }
     }
     // 兜底：不依赖类名，按位置找底部条（防止 tab 栏类名和猜测不一致）
