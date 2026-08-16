@@ -588,11 +588,7 @@ static void openTodoOverlay(void) {
     [root addChildViewController:vc];
     vc.view.frame = CGRectMake(0, 0, window.bounds.size.width, CGRectGetMinY(tb));
     vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    vc.view.alpha = 0;
     [root.view addSubview:vc.view];
-    [UIView animateWithDuration:0.2 animations:^{
-        vc.view.alpha = 1;
-    }];
     [vc didMoveToParentViewController:root];
     g_todoOverlayVC = vc;
     diagLog(@"待办页以内嵌方式打开（底部菜单可见）");
