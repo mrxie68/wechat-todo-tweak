@@ -5,6 +5,7 @@ set -euo pipefail
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 echo "iOS SDK: $SDK"
 
+set +e
 clang \
   -arch arm64 \
   -isysroot "$SDK" \
@@ -22,7 +23,15 @@ clang \
   -o wechat-todo.dylib \
   AISettings.m AITodoManager.m SubTaskItem.m MainTodoItem.m \
   TodoEditorViewController.m \
-  TodoSettingsViewController.m CustomCalendarTodoViewController.m CustomTodoTableViewCell.m WeChatTodoTweak.m
+  TodoSettingsViewController.m CustomCalendarTodoViewController.m CustomTodoTableViewCell.m WeChatTodoTweak.m \
+  > build.log 2>&1
+RC=$?
+set -e
+cat build.log
+if [ $RC -ne 0 ]; then
+  echo "编译失败，退出码 $RC"
+  exit $RC
+fi
 
 codesign -f -s - wechat-todo.dylib || true
 

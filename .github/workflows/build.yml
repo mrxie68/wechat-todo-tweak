@@ -12,7 +12,14 @@ jobs:
       - name: 编译 dylib
         run: bash build.sh
       - name: 上传 dylib
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wechat-todo-dylib
           path: wechat-todo.dylib
+      - name: 上传编译日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
