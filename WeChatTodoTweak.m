@@ -374,6 +374,8 @@ static void (*orig_tabLayoutSubviews)(id, SEL);
 
 static NSObject *g_diagLock = nil;
 static NSMutableArray *g_diagEvents = nil;
+static BOOL g_todoSettingHooked = NO;        // 设置页原生入口是否已装上（诊断用）
+static BOOL g_todoSettingsFallbackUsed = NO; // 是否已退回 wcplugins 兜底
 
 static void diagLog(NSString *fmt, ...) {
     va_list args;
@@ -959,8 +961,6 @@ static void *kTodoOrigHeightKey = &kTodoOrigHeightKey;
 
 static void (*orig_reloadTableData_setting)(id, SEL);
 static void (*orig_viewDidAppear_setting)(id, SEL, BOOL);
-static BOOL g_todoSettingHooked = NO;
-static BOOL g_todoSettingsFallbackUsed = NO;
 
 static NSInteger swz_todo_numberOfRows(id, SEL, UITableView *, NSInteger);        // 前向声明
 static UITableViewCell *swz_todo_cellForRow(id, SEL, UITableView *, NSIndexPath *);
