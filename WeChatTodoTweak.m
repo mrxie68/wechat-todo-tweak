@@ -700,11 +700,11 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     UIView *item = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
     item.userInteractionEnabled = YES;
 
-    // 新版本 tab 栏高度可能到 90pt：内容集中在上半部分，仿原生图标+文字比例
-    CGFloat contentTop = MAX(6.0, (height - 55.0) / 2.0 + 6.0);
-    CGFloat iconSize = 30.0;
+    // 对齐微信原生 MMTabBarItemView：图标 28x28 在顶部，文字 12pt 在下方
+    CGFloat iconSize = 28.0;
+    CGFloat iconY = height >= 80 ? 8.0 : 6.0;
     UIImageView *iv = [[UIImageView alloc]
-                       initWithFrame:CGRectMake((width - iconSize) / 2.0, contentTop, iconSize, iconSize)];
+                       initWithFrame:CGRectMake((width - iconSize) / 2.0, iconY, iconSize, iconSize)];
     iv.contentMode = UIViewContentModeScaleAspectFit;
     UIImage *icon = [UIImage systemImageNamed:@"checklist"];
     if (icon) {
@@ -716,7 +716,8 @@ static UIView *makeTodoTabItemView(CGFloat width, CGFloat height) {
     [item addSubview:iv];
     g_todoTabIcon = iv;
 
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, contentTop + iconSize + 4, width, 14)];
+    CGFloat labelY = height >= 80 ? height - 52.0 : height - 17.0; // 90→38, 55→38
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, labelY, width, 12)];
     label.text = @"待办";
     label.font = [UIFont systemFontOfSize:10];
     label.textColor = [UIColor systemGrayColor];
