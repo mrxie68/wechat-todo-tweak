@@ -351,11 +351,12 @@ static void runTodoContactCleanupOnce(void) {
 
 static void diagLog(NSString *fmt, ...); // 前向声明（定义在下方）
 
-// 崩溃自恢复：启动时标记，若 45 秒内没有清除（说明可能崩了），下次跳过 tab 注入
+static BOOL g_todoSkipInjection = NO; // 本次启动是否跳过 tab 注入（构造时决定）
+
+// 崩溃自恢复：只在“上一次同版本疑似崩溃”时跳过，新版本/正常启动不拦
 static BOOL todoTabCrashGuard(void) {
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    if ([d boolForKey:@"WeChatTodoTabSuspectedCrash"]) {
-        diagLog(@"检测到上次疑似崩溃，本次跳过 tab 注入");
+    if (g_todoSkipInjection) {
+        diagLog(@"上次同版本疑似崩溃，本次跳过 tab 注入");
         return NO;
     }
     return YES;
@@ -979,16 +980,18 @@ static void WeChatTodoInit(void) {
     NSLog(kAITodoLogPrefix "待办事项插件已加载（v%@）…", kAITodoVersion);
     g_diagLock = [[NSObject alloc] init];
 
-    // 崩溃自恢复：启动即标记；若微信正常跑到 45 秒则清除（说明没崩）
+    // 崩溃自恢复：先判断“上一次同版本是否疑似崩溃”，再武装本次标记
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *crashVer = [defaults stringForKey:@"WeChatTodoTabCrashVersion"];
-    if (![crashVer isEqualToString:kAITodoVersion]) {
-        // 换了新版本：重置上次的崩溃标记，让新包第一次启动就正常注入
-        [defaults setBool:NO forKey:@"WeChatTodoTabSuspectedCrash"];
+    BOOL crashedLast = [defaults boolForKey:@"WeChatTodoTabSuspectedCrash"] &&
+                       [crashVer isEqualToString:kAITodoVersion];
+    if (crashedLast) {
+        g_todoSkipInjection = YES; // 上次同版本崩了，本次跳过注入，先保证微信能开
     }
     [defaults setBool:YES forKey:@"WeChatTodoTabSuspectedCrash"];
     [defaults setObject:kAITodoVersion forKey:@"WeChatTodoTabCrashVersion"];
     [defaults synchronize];
+    // 正常跑到 45 秒则清除标记（说明没崩）
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         [defaults setBool:NO forKey:@"WeChatTodoTabSuspectedCrash"];
